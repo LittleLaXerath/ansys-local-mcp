@@ -1,0 +1,33 @@
+{
+  "version": "1",
+  "workdir": ".",
+  "variables": {
+    "target": "."
+  },
+  "steps": [
+    {
+      "id": "check_project_dir",
+      "type": "assert",
+      "path": "${target}",
+      "exists": true
+    },
+    {
+      "id": "collect_readme",
+      "type": "collect",
+      "artifacts": [
+        {
+          "name": "readme",
+          "path": "README.md",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "readme",
+      "path": "README.md",
+      "required": true
+    }
+  ]
+}

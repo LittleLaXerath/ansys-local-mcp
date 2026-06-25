@@ -1,0 +1,19 @@
+{
+  "version": "1",
+  "workdir": ".",
+  "variables": {
+    "journal": "examples/workbench_noop.wbjn"
+  },
+  "steps": [
+    {
+      "id": "run_workbench_journal",
+      "type": "command",
+      "command_id": "runwb2_batch",
+      "args": [
+        "-B",
+        "-R",
+        "${journal}"
+      ]
+    }
+  ]
+}

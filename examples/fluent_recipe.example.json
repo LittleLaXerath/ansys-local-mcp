@@ -1,0 +1,47 @@
+{
+  "launch": {
+    "mode": "solver",
+    "dimension": 3,
+    "precision": "double",
+    "processor_count": 4,
+    "ui_mode": "no_gui_or_graphics",
+    "cwd": ".",
+    "start_transcript": true
+  },
+  "read": {
+    "case": "path/to/input.cas.h5",
+    "method": "case"
+  },
+  "operations": [
+    {
+      "op": "mesh_check"
+    },
+    {
+      "op": "iterate",
+      "iterations": 10
+    },
+    {
+      "op": "create_force_report",
+      "name": "drag_y",
+      "zones": [
+        "body"
+      ],
+      "force_vector": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "report_output_type": "Drag Force"
+    },
+    {
+      "op": "compute_reports",
+      "names": [
+        "drag_y"
+      ],
+      "store_as": "forces"
+    }
+  ],
+  "write": {
+    "case_data": "path/to/output.cas.h5"
+  }
+}

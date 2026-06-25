@@ -1,0 +1,48 @@
+{
+  "version": "1",
+  "workdir": ".",
+  "continue_on_error": true,
+  "steps": [
+    {
+      "id": "launch_spaceclaim",
+      "type": "command",
+      "command_id": "spaceclaim",
+      "args": [],
+      "detach": true
+    },
+    {
+      "id": "launch_mechanical",
+      "type": "command",
+      "command_id": "mechanical",
+      "args": [],
+      "detach": true
+    },
+    {
+      "id": "cfx_pre_help",
+      "type": "command",
+      "command_id": "cfx_pre",
+      "args": [
+        "-help"
+      ],
+      "timeout_seconds": 60
+    },
+    {
+      "id": "cfx_solve_help",
+      "type": "command",
+      "command_id": "cfx_solve",
+      "args": [
+        "-help"
+      ],
+      "timeout_seconds": 60
+    },
+    {
+      "id": "cfd_post_help",
+      "type": "command",
+      "command_id": "cfd_post",
+      "args": [
+        "-help"
+      ],
+      "timeout_seconds": 60
+    }
+  ]
+}

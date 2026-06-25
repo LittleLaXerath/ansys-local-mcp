@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ansys-local-mcp"
+version = "0.1.0"
+description = "Experimental local MCP server for orchestrating Ansys workflows through Workbench and direct product commands."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "Project contributors" }
+]
+keywords = ["mcp", "ansys", "fluent", "cfx", "workbench", "mechanical", "spaceclaim"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering",
+]
+dependencies = [
+  "mcp[cli]>=1.0",
+  "pydantic>=2",
+]
+
+[project.urls]
+Homepage = "https://github.com/LittleLaXerath/ansys-local-mcp"
+Issues = "https://github.com/LittleLaXerath/ansys-local-mcp/issues"
+
+[project.scripts]
+ansys-local-mcp = "ansys_mcp.server:main"
+
+[tool.setuptools.packages.find]
+include = ["ansys_mcp*"]
