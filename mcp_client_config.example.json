@@ -4,8 +4,6 @@
       "command": "ansys-local-mcp",
       "args": [],
       "env": {
-        "ANSYS_MCP_ROOT": "C:\\Program Files\\ANSYS Inc\\v261",
-        "ANSYS_MCP_VERSION_TAG": "261",
         "ANSYS_MCP_ALLOWED_ROOTS": "C:\\Users\\YOUR-NAME\\ansys-work"
       }
     }

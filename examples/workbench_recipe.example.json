@@ -1,0 +1,90 @@
+{
+  "version": "1",
+  "workdir": "..",
+  "steps": [
+    {
+      "id": "workbench_suite",
+      "type": "workbench",
+      "mode": "batch",
+      "recipe": {
+        "version": "1",
+        "actions": [
+          {
+            "op": "get_system",
+            "name": "FLUENT",
+            "store_as": "fluent"
+          },
+          {
+            "op": "get_container",
+            "target": "fluent",
+            "component_name": "Setup",
+            "store_as": "fluent_setup"
+          },
+          {
+            "op": "send_command",
+            "target": "fluent_setup",
+            "script_path": "examples/scripts/fluent_setup.jou"
+          },
+          {
+            "op": "get_system",
+            "name": "CFX",
+            "store_as": "cfx"
+          },
+          {
+            "op": "get_container",
+            "target": "cfx",
+            "component_name": "Setup",
+            "store_as": "cfx_setup"
+          },
+          {
+            "op": "send_command",
+            "target": "cfx_setup",
+            "script_path": "examples/scripts/cfx_setup.ccl"
+          },
+          {
+            "op": "get_system",
+            "name": "MECH",
+            "store_as": "mechanical"
+          },
+          {
+            "op": "get_container",
+            "target": "mechanical",
+            "component_name": "Model",
+            "store_as": "model"
+          },
+          {
+            "op": "send_command",
+            "target": "model",
+            "language": "Python",
+            "script_path": "examples/scripts/mechanical_setup.py"
+          },
+          {
+            "op": "get_system",
+            "name": "GEO",
+            "store_as": "geometry_system"
+          },
+          {
+            "op": "get_container",
+            "target": "geometry_system",
+            "component_name": "Geometry",
+            "store_as": "geometry"
+          },
+          {
+            "op": "call",
+            "target": "geometry",
+            "method": "Edit",
+            "kwargs": {
+              "IsSpaceClaimGeometry": true,
+              "Interactive": false
+            }
+          },
+          {
+            "op": "run_script",
+            "target": "geometry",
+            "script_path": "examples/scripts/spaceclaim_geometry.py"
+          }
+        ]
+      }
+    }
+  ]
+}

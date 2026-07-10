@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
@@ -31,7 +31,7 @@ def inspect_runtime() -> dict[str, Any]:
 
 @mcp.tool()
 def check_ansys_security_surface() -> dict[str, Any]:
-    """Read-only security surface check for Ansys entry points and licensing helpers."""
+    """Opt-in signature report. Results never gate validation or execution."""
     paths = known_paths()
     signature_targets = [
         paths["runwb2"],
@@ -46,7 +46,10 @@ def check_ansys_security_surface() -> dict[str, Any]:
     ]
     return {
         "signatures": [signature_info(path) for path in signature_targets],
-        "note": "Signature mismatches mean the file differs from its embedded signature. This server only reports signature status.",
+        "note": (
+            "This opt-in report is informational. Missing or mismatched signatures never block workflows, "
+            "and the server does not inspect or manage product licensing."
+        ),
     }
 
 
@@ -177,9 +180,15 @@ def validate_workflow(
     workflow: dict[str, Any] | None = None,
     workflow_path: str | None = None,
     variables: dict[str, Any] | None = None,
+    validation_mode: Literal["runtime", "schema"] = "runtime",
 ) -> dict[str, Any]:
     """Validate a workflow without launching Ansys or mutating files."""
-    return validate_workflow_impl(workflow=workflow, workflow_path=workflow_path, variables=variables)
+    return validate_workflow_impl(
+        workflow=workflow,
+        workflow_path=workflow_path,
+        variables=variables,
+        validation_mode=validation_mode,
+    )
 
 
 @mcp.tool()

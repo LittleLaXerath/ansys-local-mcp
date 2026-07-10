@@ -1,8 +1,8 @@
 # Ansys Local MCP / Ansys 本地 MCP
 
-Experimental local MCP adapter for Ansys workflows.
+Experimental local MCP adapter for reliable, data-driven Ansys automation.
 
-用于 Ansys 本地工作流编排的实验性 MCP 适配器。
+用于可靠、数据驱动 Ansys 自动化的实验性本地 MCP 适配器。
 
 This project is not affiliated with, endorsed by, or sponsored by Ansys.
 
@@ -14,15 +14,21 @@ This project is not affiliated with, endorsed by, or sponsored by Ansys.
 | --- | --- | --- |
 | README | [中文说明](README.zh-CN.md) | [English README](README.en.md) |
 | Security | [中文安全提示](SECURITY.zh-CN.md) | [English Security Notes](SECURITY.en.md) |
+| Examples | [工作流示例](examples/README.md) | [Workflow examples](examples/README.md) |
 
-## Short Overview / 简要说明
+## v0.2 Overview / v0.2 概览
 
-This repository provides a small local MCP server with a workflow engine,
-command whitelist, Workbench-first orchestration, and direct product channels
-for Fluent, CFX, SpaceClaim, Mechanical, MAPDL, System Coupling, and Ansys
-Python.
+- Strict Workflow v1 schemas and fail-closed path boundaries.
+- Automatic local Ansys discovery without license or signature gating.
+- Structured Workbench recipes for Fluent, CFX, Mechanical, and SpaceClaim.
+- Direct product commands and generic PyFluent primitives.
+- Retry policy, step outputs, complete logs, process-tree timeouts, and atomic manifests.
 
-这个仓库提供一个小型本地 MCP 服务器，包含工作流引擎、命令白名单、Workbench 优先编排，以及面向 Fluent、CFX、SpaceClaim、Mechanical、MAPDL、System Coupling 和 Ansys Python 的直接产品通道。
+- 严格的 Workflow v1 Schema 和失败即关闭的路径边界。
+- 自动发现本机 Ansys，不使用许可证或签名状态拦截执行。
+- 通过结构化 Workbench recipe 驱动 Fluent、CFX、Mechanical 和 SpaceClaim。
+- 保留直接产品命令与通用 PyFluent primitives。
+- 支持重试、步骤输出、完整日志、进程树超时和原子 manifest。
 
 ## Install / 安装
 
@@ -31,20 +37,16 @@ git clone https://github.com/LittleLaXerath/ansys-local-mcp.git
 cd ansys-local-mcp
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
-```
-
-Run / 运行：
-
-```powershell
 ansys-local-mcp
 ```
 
-## Safety First / 安全优先
+## Safety / 安全
 
-This is a local command-execution MCP server. Review workflows before running
-them, restrict `ANSYS_MCP_ALLOWED_ROOTS`, and do not expose the server to
-untrusted clients.
+This server executes trusted local automation. Restrict
+`ANSYS_MCP_ALLOWED_ROOTS`, review workflows and product scripts, and do not
+expose it to untrusted clients. The server does not inspect, bypass, modify, or
+manage Ansys licensing. Signature reports are optional and never gate runs.
 
-这是一个本地命令执行 MCP 服务器。运行前请审查工作流，限制 `ANSYS_MCP_ALLOWED_ROOTS`，不要把服务器暴露给不受信任的客户端。
+该服务器会执行受信任的本地自动化。请限制 `ANSYS_MCP_ALLOWED_ROOTS`，审查工作流与产品脚本，不要暴露给不受信任的客户端。服务器不会检查、绕过、修改或管理 Ansys 授权；签名报告仅供主动诊断，永不拦截运行。
 
 See / 参见：[Security / 安全提示](SECURITY.md)

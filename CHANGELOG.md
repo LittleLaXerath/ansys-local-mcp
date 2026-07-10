@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0
+
+- Adds strict Workflow v1 schemas, retry policy, step outputs, and runtime references.
+- Adds automatic Ansys installation discovery without license or signature gating.
+- Adds a generic Workbench recipe step for Fluent, CFX, Mechanical, and SpaceClaim orchestration.
+- Adds shared PyFluent operation schemas and compatibility aliases.
+- Adds fail-closed allowed roots, command argument policies, process-tree timeouts,
+  complete step logs, and incremental atomic manifests.
+- Expands Windows unit coverage without launching Ansys products.
+
 ## 0.1.0
 
 - Initial experimental release.

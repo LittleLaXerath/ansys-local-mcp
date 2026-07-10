@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "workdir": ".",
+  "workdir": "..",
   "variables": {
     "target": "."
   },

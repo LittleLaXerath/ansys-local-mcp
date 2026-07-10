@@ -76,7 +76,7 @@ class WorkflowTests(unittest.TestCase):
             }
         )
         self.assertFalse(result["ok"])
-        self.assertEqual(result["diagnostics"][0]["code"], "VALIDATION_ERROR")
+        self.assertEqual(result["diagnostics"][0]["code"], "COMMAND_POLICY_ERROR")
 
     def test_validate_does_not_mutate(self) -> None:
         target = self.scratch / "validate_only.txt"
@@ -138,16 +138,18 @@ class WorkflowTests(unittest.TestCase):
 
     def test_example_workflow_validates(self) -> None:
         example = PROJECT / "examples" / "workflow.example.json"
-        payload = json.loads(example.read_text(encoding="utf-8"))
-        result = validate_workflow(workflow=payload)
+        result = validate_workflow(workflow_path=str(example), validation_mode="schema")
         self.assertTrue(result["ok"], result)
 
     def test_command_examples_parse_without_ansys(self) -> None:
-        for name in ["workbench_first_suite.example.json", "direct_channels.example.json"]:
+        for name in [
+            "workbench_first_suite.example.json",
+            "workbench_recipe.example.json",
+            "direct_channels.example.json",
+        ]:
             example = PROJECT / "examples" / name
-            payload = json.loads(example.read_text(encoding="utf-8"))
-            self.assertEqual(payload["version"], "1")
-            self.assertTrue(payload["steps"])
+            result = validate_workflow(workflow_path=str(example), validation_mode="schema")
+            self.assertTrue(result["ok"], result)
 
     def test_fastmcp_tool_registration(self) -> None:
         from ansys_mcp.server import mcp
@@ -187,6 +189,9 @@ class FakePyFluentTests(unittest.TestCase):
             ["settings.setup.missing", "settings.setup.materials.fluid[air].density"],
         )
         self.assertIs(resolved, leaf)
+
+        quoted = _resolve_any(solver, 'settings.setup.materials.fluid["air"].density')
+        self.assertIs(quoted, leaf)
 
     def test_set_state_operation(self) -> None:
         leaf = FakeNode()

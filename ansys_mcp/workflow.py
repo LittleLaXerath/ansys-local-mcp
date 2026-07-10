@@ -1,145 +1,122 @@
 from __future__ import annotations
 
+import copy
 import json
 import re
 import shutil
-import subprocess
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import ValidationError
 
-from .command_registry import command_argv, command_specs, inspect_commands, supported_command_ids
+from .command_registry import (
+    CommandPolicyError,
+    command_argv,
+    command_specs,
+    inspect_commands,
+    validate_command_args,
+)
 from .config import (
-    ANSYS_ROOT,
-    VERSION_TAG,
-    allowed_roots,
+    ConfigurationError,
+    allowed_roots_info,
     ansys_env,
     default_workdir,
+    discover_installation,
+    inline_code_allowed,
     known_paths,
     require_allowed_file,
     require_allowed_path,
     safe_workdir,
 )
+from .process_supervisor import ProcessResult, run_process
+from .pyfluent_operations import (
+    COMPATIBILITY_ALIASES,
+    PRIMITIVE_OPERATIONS,
+    normalize_operation,
+)
 from .runtime import ansys_python_executable
+from .schemas import (
+    ArtifactSpec,
+    AssertStep,
+    BaseWorkflowStep,
+    CollectStep,
+    CommandStep,
+    FileStep,
+    PyFluentStep,
+    PythonScriptStep,
+    WORKFLOW_STEP_ADAPTER,
+    WorkbenchStep,
+    WorkflowModel,
+    effective_step_id,
+)
+from .workbench_recipe import (
+    WorkbenchRecipeError,
+    compile_workbench_recipe,
+    load_workbench_recipe,
+    read_workbench_result,
+    validate_workbench_recipe_paths,
+)
 
 
 ERROR_VALIDATION = "VALIDATION_ERROR"
+ERROR_CONFIG = "CONFIG_ERROR"
 ERROR_PATH_DENIED = "PATH_DENIED"
+ERROR_COMMAND_POLICY = "COMMAND_POLICY_ERROR"
 ERROR_EXECUTABLE_MISSING = "EXECUTABLE_MISSING"
+ERROR_PROCESS_LAUNCH = "PROCESS_LAUNCH_ERROR"
 ERROR_PROCESS_TIMEOUT = "PROCESS_TIMEOUT"
 ERROR_PROCESS_NONZERO = "PROCESS_NONZERO"
 ERROR_PYFLUENT_IMPORT = "PYFLUENT_IMPORT_ERROR"
 ERROR_PYFLUENT_OPERATION = "PYFLUENT_OPERATION_ERROR"
+ERROR_WORKBENCH_RECIPE = "WORKBENCH_RECIPE_ERROR"
+ERROR_INLINE_CODE_DISABLED = "INLINE_CODE_DISABLED"
 ERROR_ARTIFACT_MISSING = "ARTIFACT_MISSING"
 
-STEP_TYPES = ("command", "python_script", "pyfluent", "file", "assert", "collect")
-PYFLUENT_OPERATIONS = (
-    "read",
-    "write",
-    "set_state",
-    "set_constant",
-    "get_state",
-    "call",
-    "tui",
-    "iterate",
-    "calculate",
-    "create",
-    "compute_reports",
-    "inspect_path",
+STEP_TYPES = ("command", "python_script", "pyfluent", "workbench", "file", "assert", "collect")
+DEFAULT_RETRY_CODES = {ERROR_PROCESS_LAUNCH, ERROR_PROCESS_TIMEOUT, ERROR_PROCESS_NONZERO}
+_VARIABLE_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+_STEP_REF_PATTERN = re.compile(
+    r"\$\{steps\.([A-Za-z][A-Za-z0-9_-]{0,63})\.outputs(?:\.([A-Za-z0-9_.-]+))?\}"
 )
-
-PATH_SUFFIXES = (
-    ".cas",
-    ".cas.h5",
-    ".dat",
-    ".dat.h5",
-    ".jou",
-    ".msh",
-    ".msh.gz",
-    ".json",
-    ".txt",
-    ".trn",
-    ".log",
-    ".py",
-    ".wbjn",
-    ".out",
-)
-
-
 class WorkflowProblem(Exception):
-    def __init__(self, code: str, message: str, step_id: str | None = None):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        step_id: str | None = None,
+        *,
+        severity: Literal["error", "warning"] = "error",
+    ):
         super().__init__(message)
         self.code = code
         self.message = message
         self.step_id = step_id
+        self.severity = severity
 
     def diagnostic(self) -> dict[str, Any]:
-        data = {"code": self.code, "message": self.message}
-        if self.step_id:
-            data["step_id"] = self.step_id
-        return data
-
-
-class ArtifactSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str | None = None
-    path: str
-    required: bool = True
-
-
-class WorkflowStep(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    id: str | None = None
-    type: Literal["command", "python_script", "pyfluent", "file", "assert", "collect"]
-    continue_on_error: bool | None = None
-    timeout_seconds: int | None = None
-    command_id: str | None = None
-    args: list[Any] = Field(default_factory=list)
-    script_path: str | None = None
-    arguments: list[Any] = Field(default_factory=list)
-    action: str | None = None
-    path: str | None = None
-    source: str | None = None
-    target: str | None = None
-    content: str | None = None
-    exists: bool | None = None
-    artifacts: list[ArtifactSpec] = Field(default_factory=list)
-    launch: dict[str, Any] = Field(default_factory=dict)
-    read: Any = None
-    operations: list[dict[str, Any]] = Field(default_factory=list)
-    write: dict[str, Any] = Field(default_factory=dict)
-
-
-class WorkflowModel(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    version: str | int = "1"
-    workdir: str | None = None
-    variables: dict[str, Any] = Field(default_factory=dict)
-    steps: list[WorkflowStep]
-    artifacts: list[ArtifactSpec] = Field(default_factory=list)
-    continue_on_error: bool = False
-
-    @field_validator("version")
-    @classmethod
-    def validate_version(cls, value: str | int) -> str | int:
-        if str(value) not in {"1", "1.0"}:
-            raise ValueError("Only workflow version 1 is supported.")
-        return value
+        return _diagnostic(self.code, self.message, self.step_id, self.severity)
 
 
 def inspect_runtime() -> dict[str, Any]:
-    paths = known_paths()
+    installation = discover_installation()
+    roots = allowed_roots_info()
+    paths = known_paths(installation.root)
+    warnings = [*installation.warnings, *roots.warnings]
+    if roots.invalid:
+        warnings.append("Invalid allowed roots: " + "; ".join(roots.invalid))
     return {
-        "ansys_root": str(ANSYS_ROOT),
-        "version_tag": VERSION_TAG,
-        "allowed_roots": [str(path) for path in allowed_roots()],
+        "ansys_root": str(installation.root) if installation.root else None,
+        "resolved_root": str(installation.root) if installation.root else None,
+        "version_tag": installation.version_tag,
+        "discovery_source": installation.source,
+        "invalid_install_candidates": list(installation.invalid_candidates),
+        "allowed_roots": [str(path) for path in roots.roots],
+        "allowed_roots_source": roots.source,
+        "invalid_allowed_roots": list(roots.invalid),
         "default_workdir": str(default_workdir()),
+        "warnings": warnings,
         "paths": {
             name: {"path": str(path), "exists": path.exists(), "is_file": path.is_file()}
             for name, path in paths.items()
@@ -148,7 +125,9 @@ def inspect_runtime() -> dict[str, Any]:
         "workflow": {
             "version": "1",
             "step_types": list(STEP_TYPES),
-            "pyfluent_operations": list(PYFLUENT_OPERATIONS),
+            "pyfluent_operations": list(PRIMITIVE_OPERATIONS),
+            "pyfluent_compatibility_aliases": list(COMPATIBILITY_ALIASES),
+            "inline_code_allowed": inline_code_allowed(),
         },
         "pyfluent_core": {
             "path": str(paths["pyfluent_core"]),
@@ -161,30 +140,39 @@ def validate_workflow(
     workflow: dict[str, Any] | None = None,
     workflow_path: str | None = None,
     variables: dict[str, Any] | None = None,
+    validation_mode: Literal["runtime", "schema"] = "runtime",
 ) -> dict[str, Any]:
-    started = time.time()
+    started = time.monotonic()
     diagnostics: list[dict[str, Any]] = []
     try:
+        if validation_mode not in {"runtime", "schema"}:
+            raise WorkflowProblem(ERROR_VALIDATION, "validation_mode must be 'runtime' or 'schema'.")
         model = load_workflow(workflow, workflow_path, variables)
-        _validate_model(model)
+        diagnostics.extend(_validate_model(model, validation_mode))
         return {
-            "ok": True,
+            "ok": not _has_errors(diagnostics),
             "stage": "validation",
+            "status": "complete" if not _has_errors(diagnostics) else "failed",
             "diagnostics": diagnostics,
             "workflow": _workflow_info(model),
-            "elapsed_s": round(time.time() - started, 3),
+            "elapsed_s": round(time.monotonic() - started, 3),
         }
     except WorkflowProblem as exc:
         diagnostics.append(exc.diagnostic())
+    except ConfigurationError as exc:
+        diagnostics.append(_diagnostic(ERROR_CONFIG, str(exc)))
     except ValidationError as exc:
-        diagnostics.append({"code": ERROR_VALIDATION, "message": str(exc)})
+        diagnostics.append(_diagnostic(ERROR_VALIDATION, str(exc)))
+    except (OSError, json.JSONDecodeError) as exc:
+        diagnostics.append(_diagnostic(ERROR_VALIDATION, str(exc)))
     except Exception as exc:
-        diagnostics.append({"code": ERROR_VALIDATION, "message": repr(exc)})
+        diagnostics.append(_diagnostic(ERROR_VALIDATION, repr(exc)))
     return {
         "ok": False,
         "stage": "validation",
+        "status": "failed",
         "diagnostics": diagnostics,
-        "elapsed_s": round(time.time() - started, 3),
+        "elapsed_s": round(time.monotonic() - started, 3),
     }
 
 
@@ -195,46 +183,73 @@ def run_workflow(
     timeout_seconds: int = 7200,
 ) -> dict[str, Any]:
     run_id = _run_id()
-    started = time.time()
+    started = time.monotonic()
     diagnostics: list[dict[str, Any]] = []
     step_results: list[dict[str, Any]] = []
     run_dir: Path | None = None
+    cwd: Path | None = None
 
     try:
+        if timeout_seconds <= 0:
+            raise WorkflowProblem(ERROR_VALIDATION, "timeout_seconds must be positive.")
         model = load_workflow(workflow, workflow_path, variables)
-        _validate_model(model)
+        diagnostics.extend(_validate_model(model, "runtime"))
+        if _has_errors(diagnostics):
+            raise WorkflowProblem(ERROR_VALIDATION, "Workflow validation failed.")
         cwd = safe_workdir(model.workdir, default_workdir())
         run_dir = cwd / ".ansys_mcp" / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
+        _write_manifest_atomic(
+            run_dir,
+            _summary(run_id, True, "running", started, step_results, [], diagnostics, run_dir),
+        )
 
-        deadline = time.time() + max(1, int(timeout_seconds))
-        for index, step in enumerate(model.steps):
-            step_result = _run_step(step, index, cwd, run_dir, max(1, int(deadline - time.time())))
-            step_results.append(step_result)
-            if not step_result["ok"]:
-                diagnostics.extend(step_result.get("diagnostics", []))
-                if not _should_continue(model, step):
-                    break
+        deadline = time.monotonic() + float(timeout_seconds)
+        result_context: dict[str, dict[str, Any]] = {}
+        for index, original_step in enumerate(model.steps):
+            step_id = effective_step_id(original_step, index)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                result = _error_step(
+                    step_id,
+                    original_step.type,
+                    time.monotonic(),
+                    ERROR_PROCESS_TIMEOUT,
+                    "Global workflow timeout expired before this step started.",
+                )
+            else:
+                resolved_step = _resolve_step(original_step, result_context, step_id)
+                result = _run_step_with_retry(resolved_step, step_id, cwd, run_dir, deadline)
+            step_results.append(result)
+            result_context[step_id] = result
+            diagnostics.extend(result.get("diagnostics", []))
+            _write_manifest_atomic(
+                run_dir,
+                _summary(run_id, not _has_errors(diagnostics), "running", started, step_results, [], diagnostics, run_dir),
+            )
+            if not result.get("ok", False) and not _should_continue(model, resolved_step if remaining > 0 else original_step):
+                break
 
-        artifacts = _collect_artifacts(model.artifacts, run_dir)
+        artifacts = _resolve_and_collect_artifacts(model.artifacts, cwd, result_context)
         diagnostics.extend(_artifact_diagnostics(artifacts))
-        ok = not diagnostics and all(step.get("ok", False) for step in step_results)
-        summary = _summary(run_id, ok, "complete", started, step_results, artifacts, diagnostics, run_dir)
+        ok = not _has_errors(diagnostics) and all(step.get("ok", False) for step in step_results)
+        status = "complete" if ok else ("timeout" if _has_code(diagnostics, ERROR_PROCESS_TIMEOUT) else "failed")
+        summary = _summary(run_id, ok, status, started, step_results, artifacts, diagnostics, run_dir)
     except WorkflowProblem as exc:
         diagnostics.append(exc.diagnostic())
-        summary = _summary(run_id, False, "validation", started, step_results, [], diagnostics, run_dir)
+        summary = _summary(run_id, False, "failed", started, step_results, [], diagnostics, run_dir)
+    except ConfigurationError as exc:
+        diagnostics.append(_diagnostic(ERROR_CONFIG, str(exc)))
+        summary = _summary(run_id, False, "failed", started, step_results, [], diagnostics, run_dir)
     except ValidationError as exc:
-        diagnostics.append({"code": ERROR_VALIDATION, "message": str(exc)})
-        summary = _summary(run_id, False, "validation", started, step_results, [], diagnostics, run_dir)
+        diagnostics.append(_diagnostic(ERROR_VALIDATION, str(exc)))
+        summary = _summary(run_id, False, "failed", started, step_results, [], diagnostics, run_dir)
     except Exception as exc:
-        diagnostics.append({"code": ERROR_VALIDATION, "message": repr(exc)})
-        summary = _summary(run_id, False, "fatal", started, step_results, [], diagnostics, run_dir)
+        diagnostics.append(_diagnostic(ERROR_VALIDATION, repr(exc)))
+        summary = _summary(run_id, False, "failed", started, step_results, [], diagnostics, run_dir)
 
-    if run_dir is None:
-        run_dir = default_workdir() / ".ansys_mcp" / "runs" / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-        summary["run_dir"] = str(run_dir)
-    _write_manifest(run_dir, summary)
+    if run_dir is not None:
+        _write_manifest_atomic(run_dir, summary)
     return summary
 
 
@@ -246,19 +261,30 @@ def load_workflow(
     if workflow is not None and workflow_path is not None:
         raise WorkflowProblem(ERROR_VALIDATION, "Pass either workflow or workflow_path, not both.")
     if workflow_path is not None:
-        path = require_allowed_file(workflow_path)
+        path = require_allowed_file(workflow_path, base=default_workdir())
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        source_base = path.parent
     elif workflow is not None:
-        payload = workflow
+        payload = copy.deepcopy(workflow)
+        source_base = default_workdir()
     else:
         raise WorkflowProblem(ERROR_VALIDATION, "Pass workflow or workflow_path.")
     if not isinstance(payload, dict):
         raise WorkflowProblem(ERROR_VALIDATION, "Workflow must be a JSON object.")
 
-    merged_variables = dict(payload.get("variables", {}))
+    raw_variables = payload.get("variables", {})
+    if not isinstance(raw_variables, dict):
+        raise WorkflowProblem(ERROR_VALIDATION, "Workflow variables must be a JSON object.")
+    merged_variables = dict(raw_variables)
     merged_variables.update(variables or {})
-    substituted = _substitute(payload, merged_variables)
-    substituted["variables"] = merged_variables
+    resolved_variables = _resolve_variables(merged_variables)
+    substituted = _substitute(payload, resolved_variables)
+    substituted["variables"] = resolved_variables
+    workdir = substituted.get("workdir")
+    if workdir:
+        candidate = Path(str(workdir)).expanduser()
+        if not candidate.is_absolute():
+            substituted["workdir"] = str((source_base / candidate).resolve(strict=False))
     return WorkflowModel.model_validate(substituted)
 
 
@@ -287,7 +313,7 @@ def legacy_pyfluent_workflow(
     workdir: str | None = None,
 ) -> dict[str, Any]:
     if recipe_path:
-        recipe_file = require_allowed_file(recipe_path)
+        recipe_file = require_allowed_file(recipe_path, base=default_workdir())
         payload = json.loads(recipe_file.read_text(encoding="utf-8-sig"))
         workdir = workdir or str(recipe_file.parent)
     else:
@@ -302,278 +328,531 @@ def legacy_pyfluent_workflow(
                 "launch": payload.get("launch", {}),
                 "read": payload.get("read"),
                 "operations": payload.get("operations", []),
-                "write": payload.get("write", {}),
+                "write": payload.get("write"),
             }
         ],
     }
 
 
-def _validate_model(model: WorkflowModel) -> None:
-    require_allowed_path(model.workdir or default_workdir(), must_exist=False, expect_file=False)
+def _validate_model(model: WorkflowModel, validation_mode: Literal["runtime", "schema"]) -> list[dict[str, Any]]:
+    diagnostics: list[dict[str, Any]] = []
+    installation = discover_installation()
+    if validation_mode == "runtime" and installation.source == "ANSYS_MCP_ROOT_INVALID":
+        invalid = "; ".join(installation.invalid_candidates) or "unknown path"
+        raise WorkflowProblem(ERROR_CONFIG, f"Explicit ANSYS_MCP_ROOT is invalid: {invalid}")
+    roots = allowed_roots_info()
+    if not roots.valid:
+        details = "; ".join(roots.invalid) if roots.invalid else "no valid directories"
+        raise WorkflowProblem(ERROR_CONFIG, f"Invalid ANSYS_MCP_ALLOWED_ROOTS: {details}")
+    diagnostics.extend(_diagnostic(ERROR_CONFIG, warning, severity="warning") for warning in roots.warnings)
+    cwd = _allowed_path(model.workdir or default_workdir(), base=default_workdir(), must_exist=False, expect_file=False)
     for index, step in enumerate(model.steps):
-        step_id = _step_id(step, index)
-        if step.type == "command":
-            _validate_command_step(step, step_id)
-        elif step.type == "python_script":
-            _validate_python_script_step(step, step_id)
-        elif step.type == "pyfluent":
-            _validate_pyfluent_step(step, step_id)
-        elif step.type == "file":
-            _validate_file_step(step, step_id)
-        elif step.type == "assert":
-            _validate_assert_step(step, step_id)
-        elif step.type == "collect":
+        step_id = effective_step_id(step, index)
+        if step.id is None:
+            diagnostics.append(
+                _diagnostic(ERROR_VALIDATION, f"Step uses implicit id {step_id}.", step_id, "warning")
+            )
+        if isinstance(step, CommandStep):
+            _validate_command_step(step, step_id, cwd, validation_mode)
+        elif isinstance(step, PythonScriptStep):
+            _validate_python_script_step(step, step_id, cwd, validation_mode)
+        elif isinstance(step, PyFluentStep):
+            diagnostics.extend(_validate_pyfluent_step(step, step_id, cwd, validation_mode))
+        elif isinstance(step, WorkbenchStep):
+            _validate_workbench_step(step, step_id, cwd, validation_mode)
+        elif isinstance(step, FileStep):
+            _validate_file_step(step, cwd)
+        elif isinstance(step, AssertStep):
+            _validate_path_string(step.path, cwd, must_exist=False)
+        elif isinstance(step, CollectStep):
             for artifact in step.artifacts:
-                _validate_path_string(artifact.path, must_exist=False)
+                _validate_path_string(artifact.path, cwd, must_exist=False)
     for artifact in model.artifacts:
-        _validate_path_string(artifact.path, must_exist=False)
+        _validate_path_string(artifact.path, cwd, must_exist=False)
+    return diagnostics
 
 
-def _validate_command_step(step: WorkflowStep, step_id: str) -> None:
-    if not step.command_id:
-        raise WorkflowProblem(ERROR_VALIDATION, "command step requires command_id.", step_id)
+def _validate_command_step(
+    step: CommandStep,
+    step_id: str,
+    cwd: Path,
+    validation_mode: Literal["runtime", "schema"],
+) -> None:
     specs = command_specs()
     if step.command_id not in specs:
         raise WorkflowProblem(ERROR_VALIDATION, f"Unknown command_id: {step.command_id}", step_id)
-    if not specs[step.command_id].executable.exists():
-        raise WorkflowProblem(ERROR_EXECUTABLE_MISSING, f"Executable not found: {specs[step.command_id].executable}", step_id)
-    _validate_argv(step.args, step_id)
-
-
-def _validate_python_script_step(step: WorkflowStep, step_id: str) -> None:
-    if not step.script_path:
-        raise WorkflowProblem(ERROR_VALIDATION, "python_script step requires script_path.", step_id)
-    require_allowed_file(step.script_path)
-    _validate_argv(step.arguments, step_id)
-
-
-def _validate_pyfluent_step(step: WorkflowStep, step_id: str) -> None:
-    pyfluent_core = known_paths()["pyfluent_core"]
-    if not pyfluent_core.exists():
-        raise WorkflowProblem(ERROR_PYFLUENT_IMPORT, f"PyFluent core path not found: {pyfluent_core}", step_id)
-    if step.read:
-        _validate_pyfluent_read(step.read, step_id)
-    if step.write:
-        _validate_value_paths(step.write, must_exist=False)
-    _validate_value_paths(step.launch, must_exist=False)
-    for operation in step.operations:
-        if operation.get("op") not in PYFLUENT_OPERATIONS and operation.get("op") != "create_force_report":
-            raise WorkflowProblem(ERROR_VALIDATION, f"Unsupported PyFluent operation: {operation.get('op')}", step_id)
-        _validate_value_paths(operation, must_exist=False)
-
-
-def _validate_file_step(step: WorkflowStep, step_id: str) -> None:
-    action = step.action or "exists"
-    if action not in {"exists", "read_text", "write_text", "copy"}:
-        raise WorkflowProblem(ERROR_VALIDATION, f"Unsupported file action: {action}", step_id)
-    if action in {"exists", "read_text"}:
-        if not step.path:
-            raise WorkflowProblem(ERROR_VALIDATION, f"file action {action} requires path.", step_id)
-        _validate_path_string(step.path, must_exist=action == "read_text")
-    elif action == "write_text":
-        target = step.target or step.path
-        if not target:
-            raise WorkflowProblem(ERROR_VALIDATION, "file write_text requires target or path.", step_id)
-        _validate_path_string(target, must_exist=False)
-    elif action == "copy":
-        if not step.source or not step.target:
-            raise WorkflowProblem(ERROR_VALIDATION, "file copy requires source and target.", step_id)
-        _validate_path_string(step.source, must_exist=True)
-        _validate_path_string(step.target, must_exist=False)
-
-
-def _validate_assert_step(step: WorkflowStep, step_id: str) -> None:
-    if not step.path:
-        raise WorkflowProblem(ERROR_VALIDATION, "assert step currently requires path.", step_id)
-    _validate_path_string(step.path, must_exist=False)
-
-
-def _validate_pyfluent_read(read: Any, step_id: str) -> None:
-    if isinstance(read, str):
-        _validate_path_string(read, must_exist=True)
-        return
-    if not isinstance(read, dict):
-        raise WorkflowProblem(ERROR_VALIDATION, "pyfluent read must be a string or object.", step_id)
-    case = read.get("case") or read.get("case_file") or read.get("case_data")
-    if case:
-        _validate_path_string(str(case), must_exist=True)
-
-
-def _run_step(step: WorkflowStep, index: int, cwd: Path, run_dir: Path, remaining_timeout: int) -> dict[str, Any]:
-    step_id = _step_id(step, index)
-    started = time.time()
+    spec = specs[step.command_id]
+    if validation_mode == "runtime" and not spec.executable.is_file():
+        raise WorkflowProblem(ERROR_EXECUTABLE_MISSING, f"Executable not found: {spec.executable}", step_id)
+    if step.detach and not spec.supports_detach:
+        raise WorkflowProblem(ERROR_COMMAND_POLICY, f"{step.command_id} does not support detach.", step_id)
     try:
-        if step.type == "command":
-            return _run_process_step(step, step_id, cwd, started, remaining_timeout)
-        if step.type == "python_script":
-            return _run_python_script_step(step, step_id, cwd, started, remaining_timeout)
-        if step.type == "pyfluent":
-            return _run_pyfluent_step(step, step_id, cwd, run_dir, started, remaining_timeout)
-        if step.type == "file":
+        validate_command_args(step.command_id, step.args, workdir=cwd, validation_mode=validation_mode)
+    except (CommandPolicyError, ValueError, ConfigurationError) as exc:
+        code = ERROR_CONFIG if isinstance(exc, ConfigurationError) else ERROR_COMMAND_POLICY
+        raise WorkflowProblem(code, str(exc), step_id) from exc
+
+
+def _validate_python_script_step(
+    step: PythonScriptStep,
+    step_id: str,
+    cwd: Path,
+    validation_mode: Literal["runtime", "schema"],
+) -> None:
+    _validate_path_string(step.script_path, cwd, must_exist=validation_mode == "runtime")
+    if validation_mode == "runtime" and not ansys_python_executable().is_file():
+        raise WorkflowProblem(ERROR_EXECUTABLE_MISSING, f"Ansys Python not found: {ansys_python_executable()}", step_id)
+    try:
+        validate_command_args(
+            "ansys_python",
+            [step.script_path, *step.arguments],
+            workdir=cwd,
+            validation_mode=validation_mode,
+        )
+    except (CommandPolicyError, ValueError, ConfigurationError) as exc:
+        raise WorkflowProblem(ERROR_COMMAND_POLICY, str(exc), step_id) from exc
+
+
+def _validate_pyfluent_step(
+    step: PyFluentStep,
+    step_id: str,
+    cwd: Path,
+    validation_mode: Literal["runtime", "schema"],
+) -> list[dict[str, Any]]:
+    if validation_mode == "runtime" and not known_paths()["pyfluent_core"].is_dir():
+        raise WorkflowProblem(ERROR_PYFLUENT_IMPORT, f"PyFluent core path not found: {known_paths()['pyfluent_core']}", step_id)
+    diagnostics: list[dict[str, Any]] = []
+    read = step.read
+    if isinstance(read, str):
+        _validate_path_string(read, cwd, must_exist=validation_mode == "runtime")
+    elif read is not None:
+        read_data = read.model_dump(exclude_none=True)
+        source = read_data.get("case_data") or read_data.get("case") or read_data.get("case_file")
+        if source:
+            _validate_path_string(source, cwd, must_exist=validation_mode == "runtime")
+    if step.write:
+        for value in step.write.model_dump(exclude_none=True).values():
+            _validate_path_string(str(value), cwd, must_exist=False)
+    if "cwd" in step.launch:
+        _validate_path_string(str(step.launch["cwd"]), cwd, must_exist=False)
+    for operation in step.operations:
+        data = operation.model_dump(exclude_none=True)
+        normalized, warning = normalize_operation(data)
+        if warning:
+            diagnostics.append(_diagnostic(ERROR_VALIDATION, warning, step_id, "warning"))
+        if normalized["op"] == "read":
+            source = normalized.get("case_data") or normalized.get("case") or normalized.get("case_file")
+            if source:
+                _validate_path_string(str(source), cwd, must_exist=validation_mode == "runtime")
+        elif normalized["op"] == "write":
+            for key in ("case", "case_data"):
+                if normalized.get(key):
+                    _validate_path_string(str(normalized[key]), cwd, must_exist=False)
+    return diagnostics
+
+
+def _validate_workbench_step(
+    step: WorkbenchStep,
+    step_id: str,
+    cwd: Path,
+    validation_mode: Literal["runtime", "schema"],
+) -> None:
+    executable_key = "runwb2_batch" if step.mode == "batch" else "runwb2"
+    executable = command_specs()[executable_key].executable
+    if validation_mode == "runtime" and not executable.is_file():
+        raise WorkflowProblem(ERROR_EXECUTABLE_MISSING, f"Workbench executable not found: {executable}", step_id)
+    try:
+        recipe = load_workbench_recipe(recipe=step.recipe, recipe_path=step.recipe_path, workdir=cwd)
+        validate_workbench_recipe_paths(recipe, cwd)
+    except WorkbenchRecipeError as exc:
+        code = ERROR_INLINE_CODE_DISABLED if "Inline" in exc.message else ERROR_WORKBENCH_RECIPE
+        raise WorkflowProblem(code, exc.message, step_id) from exc
+    except (ValueError, ConfigurationError) as exc:
+        code = ERROR_CONFIG if isinstance(exc, ConfigurationError) else ERROR_PATH_DENIED
+        raise WorkflowProblem(code, str(exc), step_id) from exc
+
+
+def _validate_file_step(step: FileStep, cwd: Path) -> None:
+    if step.action in {"exists", "read_text"}:
+        _validate_path_string(str(step.path), cwd, must_exist=step.action == "read_text")
+    elif step.action == "write_text":
+        _validate_path_string(str(step.target or step.path), cwd, must_exist=False)
+    elif step.action == "copy":
+        _validate_path_string(str(step.source), cwd, must_exist=True)
+        _validate_path_string(str(step.target), cwd, must_exist=False)
+
+
+def _run_step_with_retry(
+    step: BaseWorkflowStep,
+    step_id: str,
+    cwd: Path,
+    run_dir: Path,
+    deadline: float,
+) -> dict[str, Any]:
+    attempts: list[dict[str, Any]] = []
+    retry_codes = set(step.retry.retry_on_codes) or DEFAULT_RETRY_CODES
+    for attempt in range(1, step.retry.max_attempts + 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            result = _error_step(
+                step_id,
+                step.type,
+                time.monotonic(),
+                ERROR_PROCESS_TIMEOUT,
+                "Global workflow timeout expired.",
+            )
+        else:
+            step_timeout = min(float(step.timeout_seconds or remaining), remaining)
+            result = _run_step_once(step, step_id, cwd, run_dir, step_timeout, attempt)
+        attempts.append(
+            {
+                "attempt": attempt,
+                "ok": result.get("ok", False),
+                "elapsed_s": result.get("elapsed_s", 0),
+                "diagnostics": result.get("diagnostics", []),
+            }
+        )
+        if result.get("ok", False):
+            break
+        code = _first_error_code(result.get("diagnostics", []))
+        if attempt >= step.retry.max_attempts or code not in retry_codes:
+            break
+        delay = min(step.retry.backoff_seconds * (2 ** (attempt - 1)), max(0, deadline - time.monotonic()))
+        if delay > 0:
+            time.sleep(delay)
+    result["attempt_count"] = len(attempts)
+    if len(attempts) > 1:
+        result["attempts"] = attempts
+    return result
+
+
+def _run_step_once(
+    step: BaseWorkflowStep,
+    step_id: str,
+    cwd: Path,
+    run_dir: Path,
+    timeout_seconds: float,
+    attempt: int,
+) -> dict[str, Any]:
+    started = time.monotonic()
+    try:
+        if isinstance(step, CommandStep):
+            return _run_command_step(step, step_id, cwd, run_dir, timeout_seconds, attempt, started)
+        if isinstance(step, PythonScriptStep):
+            return _run_python_script_step(step, step_id, cwd, run_dir, timeout_seconds, attempt, started)
+        if isinstance(step, PyFluentStep):
+            return _run_pyfluent_step(step, step_id, cwd, run_dir, timeout_seconds, attempt, started)
+        if isinstance(step, WorkbenchStep):
+            return _run_workbench_step(step, step_id, cwd, run_dir, timeout_seconds, attempt, started)
+        if isinstance(step, FileStep):
             return _run_file_step(step, step_id, cwd, started)
-        if step.type == "assert":
+        if isinstance(step, AssertStep):
             return _run_assert_step(step, step_id, cwd, started)
-        if step.type == "collect":
-            return _ok_step(step_id, step.type, started, {"artifacts": _collect_artifacts(step.artifacts, run_dir)})
+        if isinstance(step, CollectStep):
+            artifacts = _collect_artifacts(step.artifacts, cwd)
+            diagnostics = _artifact_diagnostics(artifacts, step_id)
+            result = _ok_step(step_id, step.type, started, {"outputs": {"artifacts": artifacts}, "artifacts": artifacts})
+            if diagnostics:
+                result["ok"] = False
+                result["diagnostics"] = diagnostics
+            return result
         raise WorkflowProblem(ERROR_VALIDATION, f"Unsupported step type: {step.type}", step_id)
     except WorkflowProblem as exc:
         return _error_step(step_id, step.type, started, exc.code, exc.message)
-    except subprocess.TimeoutExpired as exc:
-        return _error_step(
-            step_id,
-            step.type,
-            started,
-            ERROR_PROCESS_TIMEOUT,
-            f"Process timed out after {exc.timeout} seconds.",
-            stdout_tail=_tail(exc.stdout or ""),
-            stderr_tail=_tail(exc.stderr or ""),
-        )
+    except ConfigurationError as exc:
+        return _error_step(step_id, step.type, started, ERROR_CONFIG, str(exc))
+    except WorkbenchRecipeError as exc:
+        return _error_step(step_id, step.type, started, ERROR_WORKBENCH_RECIPE, exc.message)
+    except FileNotFoundError as exc:
+        return _error_step(step_id, step.type, started, ERROR_PROCESS_LAUNCH, str(exc))
+    except OSError as exc:
+        return _error_step(step_id, step.type, started, ERROR_PROCESS_LAUNCH, str(exc))
     except Exception as exc:
         return _error_step(step_id, step.type, started, ERROR_VALIDATION, repr(exc))
 
 
-def _run_process_step(
-    step: WorkflowStep,
-    step_id: str,
-    cwd: Path,
-    started: float,
-    remaining_timeout: int,
-) -> dict[str, Any]:
-    argv = command_argv(str(step.command_id), step.args)
-    if bool(getattr(step, "detach", False)):
-        proc = subprocess.Popen(argv, cwd=str(cwd), env=ansys_env())
-        return _ok_step(
-            step_id,
-            step.type,
-            started,
-            {"pid": proc.pid, "command": argv, "workdir": str(cwd), "detached": True},
-        )
-    proc = subprocess.run(
-        argv,
-        cwd=str(cwd),
-        env=ansys_env(),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=min(step.timeout_seconds or remaining_timeout, remaining_timeout),
-    )
-    result = _process_step_result(step_id, step.type, started, argv, cwd, proc)
-    if proc.returncode != 0:
-        result["ok"] = False
-        result["diagnostics"] = [
-            {"code": ERROR_PROCESS_NONZERO, "message": f"Process exited with return code {proc.returncode}.", "step_id": step_id}
-        ]
-    return result
-
-
-def _run_python_script_step(
-    step: WorkflowStep,
-    step_id: str,
-    cwd: Path,
-    started: float,
-    remaining_timeout: int,
-) -> dict[str, Any]:
-    if not step.script_path:
-        raise WorkflowProblem(ERROR_VALIDATION, "python_script step requires script_path.", step_id)
-    argv = command_argv("ansys_python", [step.script_path, *step.arguments])
-    proc = subprocess.run(
-        argv,
-        cwd=str(cwd),
-        env=ansys_env(),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=min(step.timeout_seconds or remaining_timeout, remaining_timeout),
-    )
-    result = _process_step_result(step_id, step.type, started, argv, cwd, proc)
-    if proc.returncode != 0:
-        result["ok"] = False
-        result["diagnostics"] = [
-            {"code": ERROR_PROCESS_NONZERO, "message": f"Script exited with return code {proc.returncode}.", "step_id": step_id}
-        ]
-    return result
-
-
-def _run_pyfluent_step(
-    step: WorkflowStep,
+def _run_command_step(
+    step: CommandStep,
     step_id: str,
     cwd: Path,
     run_dir: Path,
+    timeout_seconds: float,
+    attempt: int,
     started: float,
-    remaining_timeout: int,
 ) -> dict[str, Any]:
+    args = validate_command_args(step.command_id, step.args, workdir=cwd, validation_mode="runtime")
+    argv = command_argv(step.command_id, args)
+    process = run_process(
+        argv,
+        cwd=cwd,
+        env=ansys_env(),
+        timeout_seconds=timeout_seconds,
+        run_dir=run_dir,
+        log_name=f"{step_id}.attempt-{attempt}",
+        detached=step.detach,
+    )
+    return _process_step_result(step_id, step.type, step.command_id, argv, cwd, process, started)
+
+
+def _run_python_script_step(
+    step: PythonScriptStep,
+    step_id: str,
+    cwd: Path,
+    run_dir: Path,
+    timeout_seconds: float,
+    attempt: int,
+    started: float,
+) -> dict[str, Any]:
+    script = require_allowed_file(step.script_path, base=cwd)
+    args = validate_command_args(
+        "ansys_python", [str(script), *step.arguments], workdir=cwd, validation_mode="runtime"
+    )
+    argv = command_argv("ansys_python", args)
+    process = run_process(
+        argv,
+        cwd=cwd,
+        env=ansys_env(),
+        timeout_seconds=timeout_seconds,
+        run_dir=run_dir,
+        log_name=f"{step_id}.attempt-{attempt}",
+    )
+    return _process_step_result(step_id, step.type, "ansys_python", argv, cwd, process, started)
+
+
+def _run_pyfluent_step(
+    step: PyFluentStep,
+    step_id: str,
+    cwd: Path,
+    run_dir: Path,
+    timeout_seconds: float,
+    attempt: int,
+    started: float,
+) -> dict[str, Any]:
+    operations: list[dict[str, Any]] = []
+    for operation in step.operations:
+        normalized, _ = normalize_operation(operation.model_dump(exclude_none=True))
+        operations.append(normalized)
+    result_file = run_dir / f"{step_id}.attempt-{attempt}.pyfluent-result.json"
     payload = {
         "launch": step.launch,
-        "read": step.read,
-        "operations": step.operations,
-        "write": step.write,
+        "read": step.read if isinstance(step.read, str) else (step.read.model_dump(exclude_none=True) if step.read else None),
+        "operations": operations,
+        "write": step.write.model_dump(exclude_none=True) if step.write else None,
         "workdir": str(cwd),
+        "result_path": str(result_file),
     }
-    recipe_file = run_dir / f"{step_id}.pyfluent.json"
+    recipe_file = run_dir / f"{step_id}.attempt-{attempt}.pyfluent.json"
     recipe_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     runner = Path(__file__).with_name("pyfluent_recipe_runner.py")
     argv = [str(ansys_python_executable()), str(runner), str(recipe_file)]
-    proc = subprocess.run(
+    process = run_process(
         argv,
-        cwd=str(cwd),
+        cwd=cwd,
         env=ansys_env(),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=min(step.timeout_seconds or remaining_timeout, remaining_timeout),
+        timeout_seconds=timeout_seconds,
+        run_dir=run_dir,
+        log_name=f"{step_id}.attempt-{attempt}",
     )
-    result = _process_step_result(step_id, step.type, started, argv, cwd, proc)
+    result = _process_step_result(step_id, step.type, "pyfluent", argv, cwd, process, started)
+    runner_result = _read_json_file(result_file)
     result["recipe_file"] = str(recipe_file)
-    if proc.returncode != 0:
-        code = ERROR_PYFLUENT_OPERATION
-        if "PYFLUENT_IMPORT_ERROR" in proc.stdout or "No module named" in proc.stderr:
-            code = ERROR_PYFLUENT_IMPORT
+    result["outputs"].update({"recipe_file": str(recipe_file), "runner_result": runner_result})
+    if not result["ok"] and not process.timed_out:
+        code = ERROR_PYFLUENT_IMPORT if _result_mentions_import_error(runner_result, process) else ERROR_PYFLUENT_OPERATION
+        result["diagnostics"] = [_diagnostic(code, "PyFluent operation failed.", step_id)]
+    return result
+
+
+def _run_workbench_step(
+    step: WorkbenchStep,
+    step_id: str,
+    cwd: Path,
+    run_dir: Path,
+    timeout_seconds: float,
+    attempt: int,
+    started: float,
+) -> dict[str, Any]:
+    recipe = load_workbench_recipe(recipe=step.recipe, recipe_path=step.recipe_path, workdir=cwd)
+    prepared = compile_workbench_recipe(recipe, workdir=cwd, run_dir=run_dir, step_id=f"{step_id}.attempt-{attempt}")
+    command_id = "runwb2_batch" if step.mode == "batch" else "runwb2"
+    args = ["-B", "-R", str(prepared.journal_path)] if step.mode == "batch" else ["-I", "-X", "-R", str(prepared.journal_path)]
+    validated_args = validate_command_args(command_id, args, workdir=cwd, validation_mode="runtime")
+    argv = command_argv(command_id, validated_args)
+    process = run_process(
+        argv,
+        cwd=cwd,
+        env=ansys_env(),
+        timeout_seconds=timeout_seconds,
+        run_dir=run_dir,
+        log_name=f"{step_id}.attempt-{attempt}",
+    )
+    result = _process_step_result(step_id, step.type, command_id, argv, cwd, process, started)
+    workbench_result = read_workbench_result(prepared.result_path)
+    result["outputs"].update(
+        {
+            "journal_path": str(prepared.journal_path),
+            "result_path": str(prepared.result_path),
+            "generated_scripts": [str(path) for path in prepared.generated_scripts],
+            "workbench_result": workbench_result,
+        }
+    )
+    result["journal_path"] = str(prepared.journal_path)
+    if result["ok"] and workbench_result is None:
         result["ok"] = False
         result["diagnostics"] = [
-            {"code": code, "message": f"PyFluent step exited with return code {proc.returncode}.", "step_id": step_id}
+            _diagnostic(ERROR_WORKBENCH_RECIPE, "Workbench did not produce a structured result file.", step_id)
+        ]
+    elif result["ok"] and not workbench_result.get("ok", False):
+        result["ok"] = False
+        result["diagnostics"] = [
+            _diagnostic(ERROR_WORKBENCH_RECIPE, "One or more Workbench recipe actions failed.", step_id)
         ]
     return result
 
 
-def _run_file_step(step: WorkflowStep, step_id: str, cwd: Path, started: float) -> dict[str, Any]:
-    action = step.action or "exists"
-    if action == "exists":
-        path = _resolve_work_path(cwd, step.path)
-        return _ok_step(step_id, step.type, started, {"path": str(path), "exists": path.exists()})
-    if action == "read_text":
-        path = _resolve_work_path(cwd, step.path)
-        return _ok_step(step_id, step.type, started, {"path": str(path), "text": path.read_text(encoding="utf-8")})
-    if action == "write_text":
-        path = _resolve_work_path(cwd, step.target or step.path)
+def _run_file_step(step: FileStep, step_id: str, cwd: Path, started: float) -> dict[str, Any]:
+    if step.action == "exists":
+        path = _runtime_path(str(step.path), cwd, must_exist=False)
+        outputs = {"path": str(path), "exists": path.exists()}
+    elif step.action == "read_text":
+        path = _runtime_path(str(step.path), cwd, must_exist=True)
+        outputs = {"path": str(path), "text": path.read_text(encoding="utf-8")}
+    elif step.action == "write_text":
+        path = _runtime_path(str(step.target or step.path), cwd, must_exist=False)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(step.content or "", encoding="utf-8")
-        return _ok_step(step_id, step.type, started, {"path": str(path), "bytes": path.stat().st_size})
-    if action == "copy":
-        source = _resolve_work_path(cwd, step.source)
-        target = _resolve_work_path(cwd, step.target)
+        outputs = {"path": str(path), "bytes": path.stat().st_size}
+    elif step.action == "copy":
+        source = _runtime_path(str(step.source), cwd, must_exist=True)
+        target = _runtime_path(str(step.target), cwd, must_exist=False)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-        return _ok_step(step_id, step.type, started, {"source": str(source), "target": str(target)})
-    raise WorkflowProblem(ERROR_VALIDATION, f"Unsupported file action: {action}", step_id)
+        outputs = {"source": str(source), "target": str(target), "bytes": target.stat().st_size}
+    else:  # pragma: no cover - guarded by schema
+        raise WorkflowProblem(ERROR_VALIDATION, f"Unsupported file action: {step.action}", step_id)
+    return _ok_step(step_id, step.type, started, {"outputs": outputs, **outputs})
 
 
-def _run_assert_step(step: WorkflowStep, step_id: str, cwd: Path, started: float) -> dict[str, Any]:
-    path = _resolve_work_path(cwd, step.path)
-    expected = True if step.exists is None else bool(step.exists)
+def _run_assert_step(step: AssertStep, step_id: str, cwd: Path, started: float) -> dict[str, Any]:
+    path = _runtime_path(step.path, cwd, must_exist=False)
     actual = path.exists()
-    if actual != expected:
-        raise WorkflowProblem(ERROR_VALIDATION, f"Assertion failed for {path}: exists={actual}, expected={expected}.", step_id)
-    return _ok_step(step_id, step.type, started, {"path": str(path), "exists": actual})
+    if actual != step.exists:
+        raise WorkflowProblem(
+            ERROR_VALIDATION,
+            f"Assertion failed for {path}: exists={actual}, expected={step.exists}.",
+            step_id,
+        )
+    outputs = {"path": str(path), "exists": actual}
+    return _ok_step(step_id, step.type, started, {"outputs": outputs, **outputs})
 
 
-def _workflow_info(model: WorkflowModel) -> dict[str, Any]:
-    return {
-        "version": str(model.version),
-        "workdir": str(require_allowed_path(model.workdir or default_workdir(), must_exist=False, expect_file=False)),
-        "step_count": len(model.steps),
-        "steps": [{"id": _step_id(step, index), "type": step.type} for index, step in enumerate(model.steps)],
-        "artifact_count": len(model.artifacts),
-    }
+def _resolve_step(
+    step: BaseWorkflowStep,
+    results: dict[str, dict[str, Any]],
+    step_id: str,
+) -> BaseWorkflowStep:
+    payload = _resolve_runtime_references(step.model_dump(mode="python"), results, step_id)
+    try:
+        return WORKFLOW_STEP_ADAPTER.validate_python(payload)
+    except ValidationError as exc:
+        raise WorkflowProblem(ERROR_VALIDATION, f"Resolved step is invalid: {exc}", step_id) from exc
+
+
+def _resolve_runtime_references(value: Any, results: dict[str, dict[str, Any]], step_id: str | None = None) -> Any:
+    if isinstance(value, dict):
+        return {key: _resolve_runtime_references(child, results, step_id) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_resolve_runtime_references(child, results, step_id) for child in value]
+    if not isinstance(value, str):
+        return value
+    full = _STEP_REF_PATTERN.fullmatch(value)
+    if full:
+        return _lookup_step_output(results, full.group(1), full.group(2), step_id)
+
+    def replace(match: re.Match[str]) -> str:
+        return str(_lookup_step_output(results, match.group(1), match.group(2), step_id))
+
+    return _STEP_REF_PATTERN.sub(replace, value)
+
+
+def _lookup_step_output(
+    results: dict[str, dict[str, Any]],
+    referenced_step: str,
+    output_path: str | None,
+    current_step: str | None,
+) -> Any:
+    if referenced_step not in results:
+        raise WorkflowProblem(
+            ERROR_VALIDATION,
+            f"Unknown or not-yet-completed step output: {referenced_step}",
+            current_step,
+        )
+    current: Any = results[referenced_step].get("outputs", {})
+    if not output_path:
+        return current
+    for part in output_path.split("."):
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+        elif isinstance(current, list) and part.isdigit() and int(part) < len(current):
+            current = current[int(part)]
+        else:
+            raise WorkflowProblem(
+                ERROR_VALIDATION,
+                f"Step output does not exist: steps.{referenced_step}.outputs.{output_path}",
+                current_step,
+            )
+    return current
+
+
+def _resolve_variables(variables: dict[str, Any]) -> dict[str, Any]:
+    resolved: dict[str, Any] = {}
+    resolving: set[str] = set()
+
+    def resolve(name: str) -> Any:
+        if name in resolved:
+            return resolved[name]
+        if name not in variables:
+            raise WorkflowProblem(ERROR_VALIDATION, f"Unknown workflow variable: {name}")
+        if name in resolving:
+            raise WorkflowProblem(ERROR_VALIDATION, f"Cyclic workflow variable reference: {name}")
+        resolving.add(name)
+
+        def variable_replace(match: re.Match[str]) -> str:
+            child = match.group(1) or match.group(2)
+            return str(resolve(child))
+
+        value = variables[name]
+        if isinstance(value, str):
+            full = _VARIABLE_PATTERN.fullmatch(value)
+            if full:
+                value = resolve(full.group(1) or full.group(2))
+            else:
+                value = _VARIABLE_PATTERN.sub(variable_replace, value)
+        else:
+            value = _substitute(value, {key: resolve(key) for key in _referenced_variables(value)})
+        resolving.remove(name)
+        resolved[name] = value
+        return value
+
+    for variable_name in variables:
+        resolve(variable_name)
+    return resolved
+
+
+def _referenced_variables(value: Any) -> set[str]:
+    if isinstance(value, dict):
+        found: set[str] = set()
+        for child in value.values():
+            found.update(_referenced_variables(child))
+        return found
+    if isinstance(value, list):
+        found = set()
+        for child in value:
+            found.update(_referenced_variables(child))
+        return found
+    if isinstance(value, str):
+        return {match.group(1) or match.group(2) for match in _VARIABLE_PATTERN.finditer(value)}
+    return set()
 
 
 def _substitute(value: Any, variables: dict[str, Any]) -> Any:
@@ -583,9 +862,7 @@ def _substitute(value: Any, variables: dict[str, Any]) -> Any:
         return [_substitute(child, variables) for child in value]
     if not isinstance(value, str):
         return value
-
-    pattern = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
-    full = pattern.fullmatch(value)
+    full = _VARIABLE_PATTERN.fullmatch(value)
     if full:
         name = full.group(1) or full.group(2)
         if name not in variables:
@@ -598,69 +875,48 @@ def _substitute(value: Any, variables: dict[str, Any]) -> Any:
             raise WorkflowProblem(ERROR_VALIDATION, f"Unknown workflow variable: {name}")
         return str(variables[name])
 
-    return pattern.sub(replace, value)
+    return _VARIABLE_PATTERN.sub(replace, value)
 
 
-def _validate_argv(args: list[Any], step_id: str) -> None:
-    if not isinstance(args, list):
-        raise WorkflowProblem(ERROR_VALIDATION, "Command arguments must be a JSON list.", step_id)
-    for arg in args:
-        if not isinstance(arg, (str, int, float, bool)):
-            raise WorkflowProblem(ERROR_VALIDATION, f"Unsupported argv value: {arg!r}", step_id)
-        if isinstance(arg, str) and _contains_shell_operator(arg):
-            raise WorkflowProblem(ERROR_VALIDATION, f"Shell control operators are not allowed in argv: {arg!r}", step_id)
+def _validate_path_string(value: str, cwd: Path, must_exist: bool) -> Path | None:
+    if _STEP_REF_PATTERN.search(value):
+        return None
+    return _allowed_path(value, base=cwd, must_exist=must_exist)
 
 
-def _contains_shell_operator(value: str) -> bool:
-    return any(token in value for token in ("&&", "||", "|", ";", "$(", "`", "<", ">"))
-
-
-def _validate_value_paths(value: Any, must_exist: bool) -> None:
-    if isinstance(value, dict):
-        for child in value.values():
-            _validate_value_paths(child, must_exist)
-    elif isinstance(value, list):
-        for child in value:
-            _validate_value_paths(child, must_exist)
-    elif isinstance(value, str) and _looks_like_path(value):
-        _validate_path_string(value, must_exist=False if not Path(value).exists() else must_exist)
-
-
-def _validate_path_string(value: str, must_exist: bool) -> Path:
+def _allowed_path(
+    value: str | Path,
+    *,
+    base: Path,
+    must_exist: bool,
+    expect_file: bool | None = None,
+) -> Path:
     try:
-        path = Path(value).expanduser()
-        if must_exist:
-            return require_allowed_path(path, must_exist=True)
-        if path.exists():
-            return require_allowed_path(path, must_exist=True)
-        parent = path.parent if str(path.parent) not in {"", "."} else default_workdir()
-        require_allowed_path(parent, must_exist=False, expect_file=False)
-        return require_allowed_path(path, must_exist=False)
+        return require_allowed_path(value, base=base, must_exist=must_exist, expect_file=expect_file)
+    except ConfigurationError:
+        raise
     except ValueError as exc:
         raise WorkflowProblem(ERROR_PATH_DENIED, str(exc)) from exc
 
 
-def _looks_like_path(value: str) -> bool:
-    text = value.strip()
-    if not text:
-        return False
-    return any(marker in text for marker in (":\\", ":/", "\\", "/")) or text.lower().endswith(PATH_SUFFIXES)
+def _runtime_path(value: str, cwd: Path, *, must_exist: bool) -> Path:
+    return _allowed_path(value, base=cwd, must_exist=must_exist)
 
 
-def _resolve_work_path(cwd: Path, value: str | None) -> Path:
-    if not value:
-        raise WorkflowProblem(ERROR_VALIDATION, "Missing path value.")
-    path = Path(value).expanduser()
-    if not path.is_absolute():
-        path = cwd / path
-    return require_allowed_path(path, must_exist=False)
+def _workflow_info(model: WorkflowModel) -> dict[str, Any]:
+    return {
+        "version": str(model.version),
+        "workdir": str(_allowed_path(model.workdir or default_workdir(), base=default_workdir(), must_exist=False)),
+        "step_count": len(model.steps),
+        "steps": [
+            {"id": effective_step_id(step, index), "type": step.type}
+            for index, step in enumerate(model.steps)
+        ],
+        "artifact_count": len(model.artifacts),
+    }
 
 
-def _step_id(step: WorkflowStep, index: int) -> str:
-    return step.id or f"step_{index + 1}"
-
-
-def _should_continue(model: WorkflowModel, step: WorkflowStep) -> bool:
+def _should_continue(model: WorkflowModel, step: BaseWorkflowStep) -> bool:
     return model.continue_on_error if step.continue_on_error is None else bool(step.continue_on_error)
 
 
@@ -668,12 +924,19 @@ def _run_id() -> str:
     return time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8]
 
 
-def _ok_step(step_id: str, step_type: str, started: float, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+def _ok_step(
+    step_id: str,
+    step_type: str,
+    started: float,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     data = {
         "id": step_id,
         "type": step_type,
         "ok": True,
-        "elapsed_s": round(time.time() - started, 3),
+        "status": "complete",
+        "elapsed_s": round(time.monotonic() - started, 3),
+        "outputs": {},
         "diagnostics": [],
     }
     data.update(extra or {})
@@ -693,48 +956,76 @@ def _error_step(
         "id": step_id,
         "type": step_type,
         "ok": False,
-        "elapsed_s": round(time.time() - started, 3),
+        "status": "timeout" if code == ERROR_PROCESS_TIMEOUT else "failed",
+        "elapsed_s": round(time.monotonic() - started, 3),
+        "outputs": {},
         "stdout_tail": stdout_tail,
         "stderr_tail": stderr_tail,
-        "diagnostics": [{"code": code, "message": message, "step_id": step_id}],
+        "diagnostics": [_diagnostic(code, message, step_id)],
     }
 
 
 def _process_step_result(
     step_id: str,
     step_type: str,
-    started: float,
+    command_id: str,
     argv: list[str],
     cwd: Path,
-    proc: subprocess.CompletedProcess[str],
+    process: ProcessResult,
+    started: float,
 ) -> dict[str, Any]:
-    return {
+    outputs = {
+        "pid": process.pid,
+        "returncode": process.returncode,
+        "stdout_path": str(process.stdout_path),
+        "stderr_path": str(process.stderr_path),
+        "detached": process.detached,
+    }
+    result = {
         "id": step_id,
         "type": step_type,
-        "ok": proc.returncode == 0,
-        "returncode": proc.returncode,
-        "command_id": argv[0],
+        "ok": process.detached or (not process.timed_out and process.returncode == 0),
+        "status": "launched" if process.detached else ("timeout" if process.timed_out else "complete"),
+        "returncode": process.returncode,
+        "pid": process.pid,
+        "command_id": command_id,
         "command": argv,
         "workdir": str(cwd),
-        "stdout_tail": _tail(proc.stdout),
-        "stderr_tail": _tail(proc.stderr),
-        "elapsed_s": round(time.time() - started, 3),
+        "stdout_path": str(process.stdout_path),
+        "stderr_path": str(process.stderr_path),
+        "stdout_tail": process.stdout_tail,
+        "stderr_tail": process.stderr_tail,
+        "elapsed_s": round(time.monotonic() - started, 3),
+        "outputs": outputs,
         "diagnostics": [],
     }
+    if process.timed_out:
+        result["ok"] = False
+        result["diagnostics"].append(
+            _diagnostic(ERROR_PROCESS_TIMEOUT, "Process exceeded its allowed timeout.", step_id)
+        )
+    elif not process.detached and process.returncode != 0:
+        result["ok"] = False
+        result["status"] = "failed"
+        result["diagnostics"].append(
+            _diagnostic(ERROR_PROCESS_NONZERO, f"Process exited with return code {process.returncode}.", step_id)
+        )
+    if process.termination_error:
+        result["diagnostics"].append(
+            _diagnostic(
+                ERROR_PROCESS_TIMEOUT,
+                f"Process-tree termination reported: {process.termination_error}",
+                step_id,
+                "warning",
+            )
+        )
+    return result
 
 
-def _tail(value: str | bytes, limit: int = 20000) -> str:
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
-    return value[-limit:] if value else ""
-
-
-def _collect_artifacts(specs: list[ArtifactSpec], run_dir: Path | None) -> list[dict[str, Any]]:
+def _collect_artifacts(specs: list[ArtifactSpec], cwd: Path) -> list[dict[str, Any]]:
     artifacts: list[dict[str, Any]] = []
     for spec in specs:
-        path = Path(spec.path).expanduser()
-        if not path.is_absolute() and run_dir is not None:
-            path = run_dir.parent.parent.parent / path
+        path = _runtime_path(spec.path, cwd, must_exist=False)
         exists = path.exists()
         artifacts.append(
             {
@@ -743,14 +1034,30 @@ def _collect_artifacts(specs: list[ArtifactSpec], run_dir: Path | None) -> list[
                 "required": spec.required,
                 "exists": exists,
                 "size": path.stat().st_size if exists and path.is_file() else None,
+                "modified_s": path.stat().st_mtime if exists else None,
             }
         )
     return artifacts
 
 
-def _artifact_diagnostics(artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _resolve_and_collect_artifacts(
+    specs: list[ArtifactSpec],
+    cwd: Path,
+    results: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    resolved: list[ArtifactSpec] = []
+    for spec in specs:
+        payload = _resolve_runtime_references(spec.model_dump(mode="python"), results)
+        resolved.append(ArtifactSpec.model_validate(payload))
+    return _collect_artifacts(resolved, cwd)
+
+
+def _artifact_diagnostics(
+    artifacts: list[dict[str, Any]],
+    step_id: str | None = None,
+) -> list[dict[str, Any]]:
     return [
-        {"code": ERROR_ARTIFACT_MISSING, "message": f"Required artifact missing: {artifact['path']}"}
+        _diagnostic(ERROR_ARTIFACT_MISSING, f"Required artifact missing: {artifact['path']}", step_id)
         for artifact in artifacts
         if artifact.get("required") and not artifact.get("exists")
     ]
@@ -759,29 +1066,76 @@ def _artifact_diagnostics(artifacts: list[dict[str, Any]]) -> list[dict[str, Any
 def _summary(
     run_id: str,
     ok: bool,
-    stage: str,
+    status: str,
     started: float,
     steps: list[dict[str, Any]],
     artifacts: list[dict[str, Any]],
     diagnostics: list[dict[str, Any]],
     run_dir: Path | None,
 ) -> dict[str, Any]:
-    stdout_tail = _tail("\n".join(step.get("stdout_tail", "") for step in steps))
-    stderr_tail = _tail("\n".join(step.get("stderr_tail", "") for step in steps))
     return {
         "ok": ok,
         "run_id": run_id,
-        "stage": stage,
+        "stage": status,
+        "status": status,
         "run_dir": str(run_dir) if run_dir else None,
         "steps": steps,
         "artifacts": artifacts,
         "diagnostics": diagnostics,
-        "stdout_tail": stdout_tail,
-        "stderr_tail": stderr_tail,
-        "elapsed_s": round(time.time() - started, 3),
+        "stdout_tail": _tail("\n".join(step.get("stdout_tail", "") for step in steps)),
+        "stderr_tail": _tail("\n".join(step.get("stderr_tail", "") for step in steps)),
+        "elapsed_s": round(time.monotonic() - started, 3),
     }
 
 
-def _write_manifest(run_dir: Path, summary: dict[str, Any]) -> None:
+def _write_manifest_atomic(run_dir: Path, summary: dict[str, Any]) -> None:
     manifest = run_dir / "manifest.json"
-    manifest.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    temporary = run_dir / "manifest.json.tmp"
+    temporary.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    temporary.replace(manifest)
+
+
+def _diagnostic(
+    code: str,
+    message: str,
+    step_id: str | None = None,
+    severity: Literal["error", "warning"] = "error",
+) -> dict[str, Any]:
+    data: dict[str, Any] = {"code": code, "message": message, "severity": severity}
+    if step_id:
+        data["step_id"] = step_id
+    return data
+
+
+def _has_errors(diagnostics: list[dict[str, Any]]) -> bool:
+    return any(item.get("severity", "error") == "error" for item in diagnostics)
+
+
+def _has_code(diagnostics: list[dict[str, Any]], code: str) -> bool:
+    return any(item.get("code") == code and item.get("severity", "error") == "error" for item in diagnostics)
+
+
+def _first_error_code(diagnostics: list[dict[str, Any]]) -> str | None:
+    for item in diagnostics:
+        if item.get("severity", "error") == "error":
+            return str(item.get("code"))
+    return None
+
+
+def _tail(value: str, limit: int = 20000) -> str:
+    return value[-limit:] if value else ""
+
+
+def _read_json_file(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _result_mentions_import_error(result: dict[str, Any] | None, process: ProcessResult) -> bool:
+    text = json.dumps(result or {}, default=str) + process.stdout_tail + process.stderr_tail
+    return "PYFLUENT_IMPORT_ERROR" in text or "No module named" in text

@@ -1,18 +1,10 @@
 # Ansys 本地 MCP 服务器
 
-[主页面](README.md) | [英文说明](README.en.md)
+[主页面](README.md) | [English README](README.en.md)
 
-这是一个实验性的本地 MCP 服务器，用来通过 Workbench 优先流程和直接产品命令编排 Ansys 工作流。
+这是一个实验性的 Windows 本地 MCP 服务器，通过严格 JSON 工作流、结构化 Workbench recipe、直接产品命令和通用 PyFluent 操作编排 Ansys。
 
-本项目不是 Ansys 官方项目，也未获得 Ansys 背书、赞助或认可。本项目不包含 Ansys 软件、许可证、求解器、官方示例或任何专有工程数据。使用前需要你本机已经安装可用的 Ansys，并具备有效授权。
-
-## 能做什么
-
-- 暴露少量稳定的 MCP 工具，用于本地 Ansys 自动化。
-- 优先使用 JSON 工作流，而不是不断新增一次性 MCP 工具。
-- 支持通过 `RunWB2` 走 Workbench 优先编排。
-- 支持 Fluent、CFX、SpaceClaim、Mechanical、MAPDL、System Coupling 和 Ansys Python 的直接命令通道。
-- 在执行前验证工作流结构、允许路径、命令编号和变量替换。
+本项目不是 Ansys 官方项目，也未获得 Ansys 背书、赞助或认可。仓库不包含 Ansys 软件、许可证、求解器或专有工程数据。使用时需要本机存在可工作的 Ansys 安装；产品授权和合规由用户与 Ansys 产品自身负责。本 MCP 不检查、绕过、修改或管理授权。
 
 ## 安装
 
@@ -23,21 +15,17 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
 ```
 
-控制台入口：
+运行控制台入口：
 
 ```powershell
 ansys-local-mcp
 ```
 
-旧入口仍然保留：
-
-```powershell
-python .\ansys_mcp_server.py
-```
+旧入口 `python .\ansys_mcp_server.py` 继续保留。
 
 ## MCP 客户端配置
 
-标准输入输出模式示例：
+服务器按以下顺序发现安装：`ANSYS_MCP_ROOT`、匹配版本的 `AWP_ROOT<tag>`、其他 `AWP_ROOT*`、Windows 注册表、固定磁盘安装目录。通常只需要配置工作目录边界：
 
 ```json
 {
@@ -46,8 +34,6 @@ python .\ansys_mcp_server.py
       "command": "ansys-local-mcp",
       "args": [],
       "env": {
-        "ANSYS_MCP_ROOT": "C:\\Program Files\\ANSYS Inc\\v261",
-        "ANSYS_MCP_VERSION_TAG": "261",
         "ANSYS_MCP_ALLOWED_ROOTS": "C:\\Users\\YOUR-NAME\\ansys-work"
       }
     }
@@ -55,17 +41,23 @@ python .\ansys_mcp_server.py
 }
 ```
 
-请根据你的机器调整 `ANSYS_MCP_ROOT` 和 `ANSYS_MCP_ALLOWED_ROOTS`。
+如果显式设置的 `ANSYS_MCP_ROOT` 无效，服务器返回 `CONFIG_ERROR`，不会静默改用其他安装。若未设置 allowed roots，则仅允许服务器启动目录，并返回 warning。
 
-## 工具
+## Schema 是什么
 
-通用工具：
+Schema 只是工作流 JSON 的格式契约：哪些字段必填、允许哪些值、ID 能使用哪些字符、不同 step 有哪些选项。它与 Ansys 授权或程序数字签名无关。
+
+Workflow v1 会在启动任何 Ansys 程序之前拒绝未知字段、空 steps、重复 step ID、路径穿越 ID、非正数超时和格式错误的产品 recipe。
+
+## MCP 工具
+
+稳定的通用工具：
 
 - `inspect_runtime`
 - `validate_workflow`
 - `run_workflow`
 
-兼容旧名称的工具：
+保持兼容的旧工具：
 
 - `get_ansys_install_info`
 - `check_ansys_security_surface`
@@ -77,130 +69,99 @@ python .\ansys_mcp_server.py
 - `run_ansys_python_script`
 - `run_pyfluent_recipe`
 
-这些兼容工具会在内部生成单步工作流，并返回和 `run_workflow` 相同结构的结果。
+`check_ansys_security_surface` 仅在用户主动调用时报告签名。安装发现、验证和执行不会调用它，其结果永远不会阻止工作流。
 
-## 命令白名单
+## Workflow v1
 
-外部进程只能通过白名单命令编号执行，并且只使用参数列表调用，不拼接任意 shell 字符串。
+Step 类型：
 
-- `ansys_python`
-- `fluent`
-- `cfx_pre`
-- `cfx_solve`
-- `cfx_post`
-- `cfd_post`
-- `runwb2`
-- `runwb2_batch`
-- `mapdl`
-- `mechanical`
-- `spaceclaim`
-- `system_coupling`
+- `command`：通过参数列表运行白名单产品命令。
+- `python_script`：使用 Ansys Python 运行允许目录内的 `.py`。
+- `pyfluent`：执行严格定义的通用 PyFluent 操作。
+- `workbench`：编译并执行结构化 Workbench recipe。
+- `file`：检查、读取、写入或复制文件。
+- `assert`：断言路径是否存在。
+- `collect`：收集必需或可选产物。
 
-## 工作流版本一
-
-只验证、不启动 Ansys 的例子：
+每个 step 都可以定义重试：
 
 ```json
 {
-  "version": "1",
-  "workdir": ".",
-  "steps": [
-    {
-      "id": "check_project_dir",
-      "type": "assert",
-      "path": ".",
-      "exists": true
-    }
-  ]
+  "id": "solve",
+  "timeout_seconds": 3600,
+  "retry": {
+    "max_attempts": 2,
+    "backoff_seconds": 2,
+    "retry_on_codes": ["PROCESS_TIMEOUT", "PROCESS_NONZERO"]
+  }
 }
 ```
 
-步骤类型：
+每个 step 都返回 `outputs`。后续步骤可使用 `${steps.<id>.outputs.<field>}`；原有 `${variable}` 变量替换继续支持。
 
-- `command`：运行白名单命令编号和参数列表。
-- `python_script`：使用 Ansys Python 运行允许路径内的脚本。
-- `pyfluent`：启动 PyFluent 并执行通用操作。
-- `file`：执行 `exists`、`read_text`、`write_text` 或 `copy`。
-- `assert`：检查路径是否存在。
-- `collect`：记录产物，不启动 Ansys。
+`validate_workflow(validation_mode="schema")` 只验证可移植结构，不要求本机存在 Ansys executable。默认 `runtime` 模式还会检查发现到的运行环境。两种验证模式都不会启动 Ansys，也不会执行工作流写文件。
 
-PyFluent 操作：
+## Workbench Recipe
+
+`workbench` step 必须且只能提供 `recipe` 或 `recipe_path` 之一。Recipe 使用 `store_as` 保存 Workbench 对象句柄，再通过 `target` 引用：
+
+```json
+{
+  "id": "suite",
+  "type": "workbench",
+  "mode": "batch",
+  "recipe": {
+    "actions": [
+      {"op": "get_system", "name": "CFX", "store_as": "cfx"},
+      {
+        "op": "get_container",
+        "target": "cfx",
+        "component_name": "Setup",
+        "store_as": "setup"
+      },
+      {
+        "op": "send_command",
+        "target": "setup",
+        "script_path": "scripts/setup.ccl"
+      }
+    ]
+  }
+}
+```
+
+Actions：`get_template`、`create_system`、`get_system`、`get_component`、`get_container`、`call`、`get_attr`、`set_attr`、`send_command`、`run_script`。嵌套参数可以使用 `{"$ref": "name"}` 引用句柄。
+
+产品脚本默认必须是 allowed roots 内的文件。只有显式设置 `ANSYS_MCP_ALLOW_INLINE_CODE=1` 后才允许内嵌 `code`；内嵌内容会先写进本次 run 目录，便于审计。
+
+完整示例见 [Workbench 全套 recipe](examples/workbench_recipe.example.json)。
+
+## PyFluent
+
+支持的通用 primitives：
 
 - `read`、`write`
 - `set_state`、`set_constant`、`get_state`
 - `call`、`tui`
 - `iterate`、`calculate`
-- `create`、`compute_reports`
-- `inspect_path`
+- `create`、`compute_reports`、`inspect_path`
 
-PyFluent 点路径支持集合索引和候选路径回退：
+点路径支持属性、整数索引、带引号的集合键和候选路径回退。旧的 `mesh_check`、`set_zone_type`、`create_force_report` 继续作为兼容别名使用，但会返回弃用 warning。
 
-```json
-{
-  "op": "set_state",
-  "path": [
-    "settings.setup.models.viscous.model",
-    "settings.setup.models.viscous"
-  ],
-  "value": "k-epsilon"
-}
+## 结果与日志
+
+`run_workflow` 返回 `ok`、`run_id`、`status`、`steps`、`artifacts`、`diagnostics`、输出尾部和耗时。每个 step 包含 `outputs` 与完整 stdout/stderr 日志路径。
+
+每次运行写入：
+
+```text
+<workdir>\.ansys_mcp\runs\<run_id>\
 ```
 
-## Workbench 优先通道
+`manifest.json` 在 run 创建时、每个 step 完成后和最终结束时原子更新。超时会终止受监督的 Windows 进程树。required artifact 缺失会返回 `ARTIFACT_MISSING` 并使 run 失败。
 
-当任务跨越 Fluent、CFX、SpaceClaim、Mechanical、Meshing 或共享工程状态时，优先使用 Workbench journal。
+## 安全边界
 
-模板：
-
-`examples/workbench_first_suite.example.json`
-
-把 `examples/workbench_noop.wbjn` 替换为你工程中真实录制或生成的 Workbench journal。
-
-## 直接产品通道
-
-直接通道适合单产品批处理、诊断和定向自动化。
-
-模板：
-
-`examples/direct_channels.example.json`
-
-对 SpaceClaim、Mechanical 这类图形界面产品，可以设置 `"detach": true`，让工作流在启动产品后返回。
-
-## 结果和诊断
-
-`run_workflow` 返回：
-
-- `ok`
-- `run_id`
-- `stage`
-- `run_dir`
-- `steps`
-- `artifacts`
-- `diagnostics`
-- `stdout_tail`
-- `stderr_tail`
-- `elapsed_s`
-
-每次运行都会写入：
-
-`<workdir>\.ansys_mcp\runs\<run_id>\manifest.json`
-
-标准诊断代码：
-
-- `VALIDATION_ERROR`
-- `PATH_DENIED`
-- `EXECUTABLE_MISSING`
-- `PROCESS_TIMEOUT`
-- `PROCESS_NONZERO`
-- `PYFLUENT_IMPORT_ERROR`
-- `PYFLUENT_OPERATION_ERROR`
-- `ARTIFACT_MISSING`
-
-编写新工作流时，建议先调用 `validate_workflow`，再调用 `run_workflow`。
-
-## 安全提示
-
-这是一个本地命令执行 MCP 服务器。请限制 `ANSYS_MCP_ALLOWED_ROOTS`，运行前审查工作流，不要把服务器暴露给不受信任的客户端。更多内容见 [中文安全提示](SECURITY.zh-CN.md)。
+Allowed roots 限制 MCP 服务器解析和使用的路径，但它不是操作系统沙箱。受信任的 Python、Workbench、Fluent、CFX、Mechanical 或 SpaceClaim 脚本仍拥有对应产品进程的系统权限。请审查脚本，只连接可信 MCP 客户端。详见 [中文安全提示](SECURITY.zh-CN.md)。
 
 ## 验证
 
@@ -209,4 +170,4 @@ python -m unittest discover tests
 python -m compileall ansys_mcp ansys_mcp_server.py
 ```
 
-测试不会启动 Fluent、Workbench、CFX、SpaceClaim、Mechanical、MAPDL 或 System Coupling。
+自动测试不会启动 Workbench、Fluent、CFX、SpaceClaim、Mechanical、MAPDL、System Coupling 或任何求解器。

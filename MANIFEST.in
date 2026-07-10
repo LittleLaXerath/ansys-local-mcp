@@ -1,0 +1,5 @@
+prune .venv
+prune .ansys_mcp
+prune build
+prune dist
+global-exclude __pycache__ *.py[cod]

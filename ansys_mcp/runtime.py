@@ -3,48 +3,15 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
-from .config import ansys_env, known_paths
-
-
-def process_result(proc: subprocess.CompletedProcess[str], args: list[str], workdir: Path) -> dict[str, Any]:
-    return {
-        "returncode": proc.returncode,
-        "stdout": proc.stdout[-20000:],
-        "stderr": proc.stderr[-20000:],
-        "command": args,
-        "workdir": str(workdir),
-    }
-
-
-def run(args: list[str], workdir: Path, timeout_seconds: int) -> dict[str, Any]:
-    proc = subprocess.run(
-        args,
-        cwd=str(workdir),
-        env=ansys_env(),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=timeout_seconds,
-    )
-    return process_result(proc, args, workdir)
-
-
-def run_batch(batch_file: Path, extra_args: list[str], workdir: Path, timeout_seconds: int) -> dict[str, Any]:
-    return run(["cmd.exe", "/d", "/c", str(batch_file), *extra_args], workdir, timeout_seconds)
-
-
-def launch(args: list[str], workdir: Path) -> dict[str, Any]:
-    proc = subprocess.Popen(args, cwd=str(workdir), env=ansys_env())
-    return {"pid": proc.pid, "command": args, "workdir": str(workdir)}
+from .config import known_paths
 
 
 def ansys_python_executable() -> Path:
-    exe = known_paths()["ansys_python"]
-    return exe if exe.exists() else Path(sys.executable)
+    """Return the discovered Ansys Python path without silently falling back."""
+    return known_paths()["ansys_python"]
 
 
 def signature_info(path: Path) -> dict[str, Any]:

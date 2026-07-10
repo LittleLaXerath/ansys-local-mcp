@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -14,6 +15,7 @@ if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
 from ansys_mcp.config import known_paths, safe_workdir  # noqa: E402
+from ansys_mcp.pyfluent_operations import normalize_operation  # noqa: E402
 
 
 def main() -> int:
@@ -33,15 +35,12 @@ def main() -> int:
     try:
         import ansys.fluent.core as pyfluent
     except Exception as exc:
-        print(
-            json.dumps(
-                {
-                    "ok": False,
-                    "errors": [{"stage": "import", "code": "PYFLUENT_IMPORT_ERROR", "error": repr(exc)}],
-                },
-                indent=2,
-            ),
-            flush=True,
+        _emit_summary(
+            recipe,
+            {
+                "ok": False,
+                "errors": [{"stage": "import", "code": "PYFLUENT_IMPORT_ERROR", "error": repr(exc)}],
+            },
         )
         return 1
 
@@ -76,7 +75,7 @@ def main() -> int:
             "errors": errors,
             "elapsed_s": round(time.time() - started, 3),
         }
-        print(json.dumps(summary, indent=2, default=str), flush=True)
+        _emit_summary(recipe, summary)
         return 0 if not errors else 2
     except Exception as exc:
         summary = {
@@ -86,7 +85,7 @@ def main() -> int:
             "errors": [*errors, {"stage": "fatal", "error": repr(exc)}],
             "elapsed_s": round(time.time() - started, 3),
         }
-        print(json.dumps(summary, indent=2, default=str), flush=True)
+        _emit_summary(recipe, summary)
         return 1
     finally:
         if solver is not None:
@@ -104,6 +103,14 @@ def _launch_kwargs(recipe: dict[str, Any]) -> dict[str, Any]:
     launch.setdefault("processor_count", 2)
     launch.setdefault("start_transcript", True)
     return launch
+
+
+def _emit_summary(recipe: dict[str, Any], summary: dict[str, Any]) -> None:
+    text = json.dumps(summary, indent=2, default=str)
+    result_path = recipe.get("result_path")
+    if result_path:
+        Path(result_path).write_text(text, encoding="utf-8")
+    print(text, flush=True)
 
 
 def _read_case(solver: Any, recipe: dict[str, Any]) -> None:
@@ -145,6 +152,7 @@ def _file_api(solver: Any) -> Any:
 
 
 def _run_operation(solver: Any, operation: dict[str, Any]) -> Any:
+    operation, _ = normalize_operation(operation)
     op = operation.get("op")
     if not op:
         raise ValueError(f"Operation is missing op: {operation}")
@@ -169,8 +177,6 @@ def _run_operation(solver: Any, operation: dict[str, Any]) -> Any:
         return solver.settings.solution.run_calculation.iterate(iter_count=int(operation["iterations"]))
     if op == "calculate":
         return solver.settings.solution.run_calculation.calculate()
-    if op == "mesh_check":
-        return solver.tui.mesh.check()
     if op == "create":
         target = _resolve_any(solver, operation["path"])
         created = target.create(operation["name"])
@@ -178,13 +184,6 @@ def _run_operation(solver: Any, operation: dict[str, Any]) -> Any:
         if state:
             created.set_state(state)
         return operation["name"]
-    if op == "set_zone_type":
-        return solver.settings.setup.boundary_conditions.set_zone_type(
-            zone_list=operation["zone_list"],
-            new_type=operation["new_type"],
-        )
-    if op == "create_force_report":
-        return _create_force_report(solver, operation)
     if op == "compute_reports":
         names = operation.get("names") or operation.get("report_defs")
         rd = solver.settings.solution.report_definitions
@@ -223,15 +222,75 @@ def _resolve_any(root: Any, paths: str | list[str]) -> Any:
 
 def _resolve(root: Any, dotted_path: str) -> Any:
     current = root
-    for part in dotted_path.split("."):
-        if "[" in part and part.endswith("]"):
-            attr, key = part[:-1].split("[", 1)
-            if attr:
-                current = getattr(current, attr)
-            current = current[key]
+    for kind, value in _path_tokens(dotted_path):
+        if kind == "attr":
+            if isinstance(current, dict) and value in current:
+                current = current[value]
+            else:
+                current = getattr(current, value)
         else:
-            current = getattr(current, part)
+            current = current[value]
     return current
+
+
+def _path_tokens(path: str) -> list[tuple[str, Any]]:
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("PyFluent path must be a non-empty string.")
+    tokens: list[tuple[str, Any]] = []
+    index = 0
+    length = len(path)
+    while index < length:
+        if path[index] == ".":
+            index += 1
+            continue
+        if path[index] == "[":
+            end = _find_bracket_end(path, index)
+            raw = path[index + 1 : end].strip()
+            if not raw:
+                raise ValueError(f"Empty collection index in path: {path}")
+            if raw[0:1] in {'"', "'"} and raw[-1:] == raw[0]:
+                if raw[0] == '"':
+                    value = json.loads(raw)
+                else:
+                    value = bytes(raw[1:-1], "utf-8").decode("unicode_escape")
+            elif re.fullmatch(r"-?\d+", raw):
+                value = int(raw)
+            else:
+                value = raw
+            tokens.append(("index", value))
+            index = end + 1
+            continue
+        end = index
+        while end < length and path[end] not in ".[":
+            end += 1
+        attr = path[index:end]
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", attr):
+            raise ValueError(f"Invalid attribute token {attr!r} in path: {path}")
+        tokens.append(("attr", attr))
+        index = end
+    return tokens
+
+
+def _find_bracket_end(path: str, start: int) -> int:
+    quote: str | None = None
+    escaped = False
+    for index in range(start + 1, len(path)):
+        char = path[index]
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\" and quote:
+            escaped = True
+            continue
+        if quote:
+            if char == quote:
+                quote = None
+            continue
+        if char in {'"', "'"}:
+            quote = char
+        elif char == "]":
+            return index
+    raise ValueError(f"Unclosed collection index in path: {path}")
 
 
 def _set_constant(target: Any, value: Any) -> Any:
@@ -244,20 +303,6 @@ def _set_constant(target: Any, value: Any) -> Any:
         return target.value.set_state(value)
     except Exception:
         return target.set_state(value)
-
-
-def _create_force_report(solver: Any, operation: dict[str, Any]) -> Any:
-    rd = solver.settings.solution.report_definitions
-    name = operation["name"]
-    report = rd.force.create(name)
-    state = {
-        key: operation[key]
-        for key in ("force_vector", "zones", "per_selection", "report_output_type")
-        if key in operation
-    }
-    if state:
-        report.set_state(state)
-    return name
 
 
 if __name__ == "__main__":
