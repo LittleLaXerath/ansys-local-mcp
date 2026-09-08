@@ -151,7 +151,7 @@ class WorkbenchRecipeTests(unittest.TestCase):
         )
         prepared = compile_workbench_recipe(recipe, workdir=PROJECT, run_dir=self.run_dir, step_id="refs")
         journal = prepared.journal_path.read_text(encoding="utf-8")
-        self.assertIn("RelativeTo=geo", journal)
+        self.assertIn('RelativeTo=_handles[u"geo"]', journal)
 
     def test_user_values_cannot_inject_internal_expressions(self) -> None:
         recipe = WorkbenchRecipe.model_validate(

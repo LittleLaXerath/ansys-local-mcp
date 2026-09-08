@@ -1,0 +1,50 @@
+{
+  "version": "1",
+  "workdir": "..",
+  "variables": {
+    "length_mm": 100,
+    "width_mm": 20,
+    "height_mm": 10
+  },
+  "steps": [
+    {"id": "new_native", "type": "assert", "path": ".ansys_mcp/spaceclaim-example/channel.scdoc", "exists": false},
+    {"id": "new_step", "type": "assert", "path": ".ansys_mcp/spaceclaim-example/channel.step", "exists": false},
+    {"id": "new_measurements", "type": "assert", "path": ".ansys_mcp/spaceclaim-example/measurements.json", "exists": false},
+    {
+      "id": "parameters",
+      "type": "file",
+      "action": "write_text",
+      "path": ".ansys_mcp/spaceclaim-example/parameters.json",
+      "content": "{\"length_mm\": ${length_mm}, \"width_mm\": ${width_mm}, \"height_mm\": ${height_mm}}"
+    },
+    {
+      "id": "geometry",
+      "type": "command",
+      "command_id": "spaceclaim",
+      "args": [
+        "/RunScript=examples/scripts/spaceclaim_geometry.py",
+        "/Headless=True",
+        "/ExitAfterScript=True",
+        "/ScriptAsync=False",
+        "/ScriptOutput=.ansys_mcp/spaceclaim-example/script.log"
+      ],
+      "produces": [
+        {
+          "path": ".ansys_mcp/spaceclaim-example/channel.scdoc"
+        },
+        {
+          "path": ".ansys_mcp/spaceclaim-example/channel.step"
+        },
+        {
+          "path": ".ansys_mcp/spaceclaim-example/measurements.json"
+        }
+      ]
+    },
+    {
+      "id": "measurements",
+      "type": "file",
+      "action": "read_text",
+      "path": ".ansys_mcp/spaceclaim-example/measurements.json"
+    }
+  ]
+}

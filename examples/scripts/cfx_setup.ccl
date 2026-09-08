@@ -1,1 +1,14 @@
-# Replace this placeholder with trusted CFX CCL commands for your project.
+# Requires an existing fluid domain named Default Domain in Flow Analysis 1.
+# The enclosing workflow saves a separate project; it does not run a solver.
+FLOW: Flow Analysis 1
+  DOMAIN: Default Domain
+    FLUID MODELS:
+      TURBULENCE MODEL:
+        Option = SST
+      END
+      TURBULENT WALL FUNCTIONS:
+        Option = Automatic
+      END
+    END
+  END
+END

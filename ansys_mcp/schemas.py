@@ -31,6 +31,7 @@ class BaseWorkflowStep(StrictModel):
     continue_on_error: bool | None = None
     timeout_seconds: float | None = Field(default=None, gt=0)
     retry: RetrySpec = Field(default_factory=RetrySpec)
+    produces: list[ArtifactSpec] = Field(default_factory=list)
 
 
 class CommandStep(BaseWorkflowStep):
@@ -38,6 +39,12 @@ class CommandStep(BaseWorkflowStep):
     command_id: str
     args: list[Any] = Field(default_factory=list)
     detach: bool = False
+
+    @model_validator(mode="after")
+    def detached_has_no_outputs(self) -> "CommandStep":
+        if self.detach and self.produces:
+            raise ValueError("Detached commands cannot promise completed artifacts; use a supervised command.")
+        return self
 
 
 class PythonScriptStep(BaseWorkflowStep):

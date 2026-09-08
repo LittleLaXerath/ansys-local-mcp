@@ -1,71 +1,41 @@
 {
   "version": "1",
   "workdir": "..",
+  "variables": {
+    "length_mm": 100,
+    "width_mm": 20,
+    "height_mm": 10
+  },
   "steps": [
     {
-      "id": "workbench_suite",
+      "id": "parameters",
+      "type": "file",
+      "action": "write_text",
+      "path": ".ansys_mcp/spaceclaim-example/parameters.json",
+      "content": "{\"length_mm\": ${length_mm}, \"width_mm\": ${width_mm}, \"height_mm\": ${height_mm}}"
+    },
+    {
+      "id": "geometry",
       "type": "workbench",
       "mode": "batch",
       "recipe": {
-        "version": "1",
+        "project": {
+          "save_path": ".ansys_mcp/spaceclaim-example/model.wbpj"
+        },
         "actions": [
           {
-            "op": "get_system",
-            "name": "FLUENT",
-            "store_as": "fluent"
+            "op": "get_template",
+            "template_name": "Geometry",
+            "store_as": "template"
+          },
+          {
+            "op": "create_system",
+            "template": "template",
+            "store_as": "system"
           },
           {
             "op": "get_container",
-            "target": "fluent",
-            "component_name": "Setup",
-            "store_as": "fluent_setup"
-          },
-          {
-            "op": "send_command",
-            "target": "fluent_setup",
-            "script_path": "examples/scripts/fluent_setup.jou"
-          },
-          {
-            "op": "get_system",
-            "name": "CFX",
-            "store_as": "cfx"
-          },
-          {
-            "op": "get_container",
-            "target": "cfx",
-            "component_name": "Setup",
-            "store_as": "cfx_setup"
-          },
-          {
-            "op": "send_command",
-            "target": "cfx_setup",
-            "script_path": "examples/scripts/cfx_setup.ccl"
-          },
-          {
-            "op": "get_system",
-            "name": "MECH",
-            "store_as": "mechanical"
-          },
-          {
-            "op": "get_container",
-            "target": "mechanical",
-            "component_name": "Model",
-            "store_as": "model"
-          },
-          {
-            "op": "send_command",
-            "target": "model",
-            "language": "Python",
-            "script_path": "examples/scripts/mechanical_setup.py"
-          },
-          {
-            "op": "get_system",
-            "name": "GEO",
-            "store_as": "geometry_system"
-          },
-          {
-            "op": "get_container",
-            "target": "geometry_system",
+            "target": "system",
             "component_name": "Geometry",
             "store_as": "geometry"
           },
@@ -82,9 +52,40 @@
             "op": "run_script",
             "target": "geometry",
             "script_path": "examples/scripts/spaceclaim_geometry.py"
+          },
+          {
+            "op": "call",
+            "target": "geometry",
+            "method": "Exit"
+          },
+          {
+            "op": "get_attr",
+            "target": "system",
+            "attribute": "Name",
+            "store_as": "system_name"
           }
         ]
-      }
+      },
+      "produces": [
+        {
+          "path": ".ansys_mcp/spaceclaim-example/model.wbpj"
+        },
+        {
+          "path": ".ansys_mcp/spaceclaim-example/channel.scdoc"
+        },
+        {
+          "path": ".ansys_mcp/spaceclaim-example/channel.step"
+        },
+        {
+          "path": ".ansys_mcp/spaceclaim-example/measurements.json"
+        }
+      ]
+    },
+    {
+      "id": "measurements",
+      "type": "file",
+      "action": "read_text",
+      "path": ".ansys_mcp/spaceclaim-example/measurements.json"
     }
   ]
 }

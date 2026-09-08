@@ -49,6 +49,8 @@ Schema 只是工作流 JSON 的格式契约：哪些字段必填、允许哪些�
 
 Workflow v1 会在启动任何 Ansys 程序之前拒绝未知字段、空 steps、重复 step ID、路径穿越 ID、非正数超时和格式错误的产品 recipe。
 
+客户端可读取 MCP 资源 `ansys://schema/workflow` 和 `ansys://schema/workbench-recipe`，获取完整字段规则。不能读取资源的客户端可调用 `inspect_runtime(include_schema=True)`。Schema 直接由 Pydantic 模型生成，公开工具仍为 12 个。
+
 ## MCP 工具
 
 稳定的通用工具：
@@ -99,6 +101,10 @@ Step 类型：
 
 每个 step 都返回 `outputs`。后续步骤可使用 `${steps.<id>.outputs.<field>}`；原有 `${variable}` 变量替换继续支持。
 
+产品脚本生成的文件可通过 `produces` 声明，例如 `"produces": [{"path": "output/model.def", "required": true}]`。验证时允许后续步骤使用这些尚未生成的文件；实际使用前会重新检查，必需产物也会在生成步骤结束后立即检查。文件写入、复制目标和已知命令输出参数会自动识别。没有声明来源的缺失输入、未知步骤或对尚未执行步骤的引用会在任何写入前报错。
+
+产品进程会收到 `ANSYS_MCP_WORKDIR` 和 `ANSYS_MCP_RUN_DIR` 环境变量，脚本可据此定位文件，无需依赖编辑器自身的当前目录。SpaceClaim 的路径参数会正确解析，`/Headless=True` 等开关保持原样。
+
 `validate_workflow(validation_mode="schema")` 只验证可移植结构，不要求本机存在 Ansys executable。默认 `runtime` 模式还会检查发现到的运行环境。两种验证模式都不会启动 Ansys，也不会执行工作流写文件。
 
 ## Workbench Recipe
@@ -111,6 +117,10 @@ Step 类型：
   "type": "workbench",
   "mode": "batch",
   "recipe": {
+    "project": {
+      "open_path": "inputs/project.wbpj",
+      "save_path": "outputs/project.wbpj"
+    },
     "actions": [
       {"op": "get_system", "name": "CFX", "store_as": "cfx"},
       {
@@ -133,7 +143,9 @@ Actions：`get_template`、`create_system`、`get_system`、`get_component`、`g
 
 产品脚本默认必须是 allowed roots 内的文件。只有显式设置 `ANSYS_MCP_ALLOW_INLINE_CODE=1` 后才允许内嵌 `code`；内嵌内容会先写进本次 run 目录，便于审计。
 
-完整示例见 [Workbench 全套 recipe](examples/workbench_recipe.example.json)。
+使用 `store_as` 保存的可序列化结果会返回到 `outputs.values`，例如 `${steps.setup.outputs.values.physics_status}`。产品对象句柄仅在当前 recipe 内可用。成功状态必须同时满足最终完成标记和全部预期动作记录，单凭退出码为零不足以确认成功。
+
+示例包括 [SpaceClaim 几何工作流](examples/workbench_recipe.example.json)、[SpaceClaim 直接通道](examples/spaceclaim_direct.example.json)和 [CFX 已有工程设置](examples/cfx_workbench.example.json)。SpaceClaim 脚本创建矩形流体体积、命名入口/出口/壁面、校验体积并导出原生文件、STEP 和测量结果。CFX 示例修改已有域的湍流设置并返回 `PhysicsStatus`，不负责生成网格或求解。运行前提和验证范围见[示例说明](examples/README.md)。
 
 ## PyFluent
 

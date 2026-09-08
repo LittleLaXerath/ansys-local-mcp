@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Literal
 
@@ -9,12 +10,25 @@ from .fluent_recipe import run_ansys_python_script as run_ansys_python_script_im
 from .fluent_recipe import run_pyfluent_recipe as run_pyfluent_recipe_impl
 from .config import known_paths, require_allowed_file
 from .runtime import signature_info
+from .schemas import WorkflowModel, WorkbenchRecipe
 from .workflow import inspect_runtime as inspect_runtime_impl
 from .workflow import run_workflow as run_workflow_impl
 from .workflow import validate_workflow as validate_workflow_impl
 
 
 mcp = FastMCP("ansys-local")
+
+
+@mcp.resource("ansys://schema/workflow", mime_type="application/schema+json")
+def workflow_schema() -> str:
+    """Workflow v1 fields, step variants, output declarations, and reference syntax."""
+    return json.dumps(WorkflowModel.model_json_schema(), indent=2)
+
+
+@mcp.resource("ansys://schema/workbench-recipe", mime_type="application/schema+json")
+def workbench_recipe_schema() -> str:
+    """Strict Workbench recipe schema, including project and action fields."""
+    return json.dumps(WorkbenchRecipe.model_json_schema(), indent=2)
 
 
 @mcp.tool()
@@ -24,9 +38,9 @@ def get_ansys_install_info() -> dict[str, Any]:
 
 
 @mcp.tool()
-def inspect_runtime() -> dict[str, Any]:
-    """Return runtime paths, command registry, allowed roots, and workflow capabilities."""
-    return inspect_runtime_impl()
+def inspect_runtime(include_schema: bool = False) -> dict[str, Any]:
+    """Inspect runtime. Set include_schema=True for complete workflow and Workbench JSON schemas."""
+    return inspect_runtime_impl(include_schema=include_schema)
 
 
 @mcp.tool()
@@ -198,7 +212,11 @@ def run_workflow(
     variables: dict[str, Any] | None = None,
     timeout_seconds: int = 7200,
 ) -> dict[str, Any]:
-    """Run a data-driven Ansys workflow with whitelisted commands and structured output."""
+    """Run an Ansys workflow. Read ansys://schema/workflow or inspect_runtime(include_schema=True) first.
+
+    Use produces to declare generated artifacts; later steps can reference
+    ${steps.ID.outputs.FIELD}. Workbench scalar results are in outputs.values.
+    """
     return run_workflow_impl(
         workflow=workflow,
         workflow_path=workflow_path,

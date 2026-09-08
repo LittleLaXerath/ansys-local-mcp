@@ -1,0 +1,62 @@
+{
+  "version": "1",
+  "workdir": "..",
+  "variables": {
+    "project": "inputs/cfx-project.wbpj",
+    "system_name": "CFX"
+  },
+  "steps": [
+    {
+      "id": "setup",
+      "type": "workbench",
+      "recipe": {
+        "project": {
+          "open_path": "${project}",
+          "save_path": ".ansys_mcp/cfx-example/setup.wbpj"
+        },
+        "actions": [
+          {
+            "op": "get_system",
+            "name": "${system_name}",
+            "store_as": "cfx"
+          },
+          {
+            "op": "get_container",
+            "target": "cfx",
+            "component_name": "Setup",
+            "store_as": "setup"
+          },
+          {
+            "op": "send_command",
+            "target": "setup",
+            "script_path": "examples/scripts/cfx_setup.ccl"
+          },
+          {
+            "op": "call",
+            "target": "setup",
+            "method": "GetCFXSetupProperties",
+            "store_as": "properties"
+          },
+          {
+            "op": "get_attr",
+            "target": "properties",
+            "attribute": "PhysicsStatus",
+            "store_as": "physics_status"
+          }
+        ]
+      },
+      "produces": [
+        {
+          "path": ".ansys_mcp/cfx-example/setup.wbpj"
+        }
+      ]
+    },
+    {
+      "id": "physics_status",
+      "type": "file",
+      "action": "write_text",
+      "path": ".ansys_mcp/cfx-example/physics-status.txt",
+      "content": "${steps.setup.outputs.values.physics_status}"
+    }
+  ]
+}

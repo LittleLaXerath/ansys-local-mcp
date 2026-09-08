@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from .config import require_allowed_path
 from .runtime import ansys_python_executable
 from .config import known_paths
+from .workflow_paths import PathChecks
 
 
 PATH_SUFFIXES = (
@@ -33,9 +33,36 @@ PATH_SUFFIXES = (
     ".txt",
     ".out",
     ".json",
+    ".gtm",
+    ".ccl",
+    ".step",
+    ".stp",
 )
 _BATCH_META_RE = re.compile(r"[&|<>^%!()\r\n\x00-\x1f]")
 _CONTROL_RE = re.compile(r"[\r\n\x00-\x08\x0b\x0c\x0e-\x1f]")
+_OPTION_ASSIGNMENT_RE = re.compile(r"^([/-][A-Za-z][A-Za-z0-9_-]*)=(.*)$")
+
+# Only path-bearing options need product knowledge; ordinary switches remain argv.
+_PATH_OPTIONS = {
+    "fluent": {"-i": "input"},
+    "cfx_pre": {"-cfx": "input", "-def": "input", "-batch": "input", "-session": "input", "-s": "input"},
+    "cfx_solve": {
+        "-def": "input", "-definition": "input", "-ccl": "input", "-ini": "input",
+        "-initial": "input", "-initial-file": "input", "-continue-from-file": "input", "-res": "input",
+    },
+    "cfx_post": {"-res": "input", "-batch": "input", "-session": "input"},
+    "cfd_post": {"-res": "input", "-batch": "input", "-session": "input"},
+    "runwb2": {"-r": "input", "-f": "input"},
+    "runwb2_batch": {"-r": "input", "-f": "input"},
+    "mapdl": {"-i": "input", "-o": "output", "-dir": "directory"},
+    "mechanical": {"-script": "input", "-file": "input"},
+    "spaceclaim": {
+        "/runscript": "input", "/scriptoutput": "output",
+        "/defaultopendirectory": "directory", "/defaultsavedirectory": "directory",
+        "/defaultusersettingsfile": "input",
+    },
+    "system_coupling": {"-r": "input"},
+}
 
 
 class CommandPolicyError(ValueError):
@@ -103,6 +130,7 @@ def inspect_commands() -> dict[str, dict[str, Any]]:
             "uses_cmd_wrapper": spec.uses_cmd_wrapper,
             "supports_detach": spec.supports_detach,
             "python_script_only": spec.python_script_only,
+            "path_options": _PATH_OPTIONS.get(command_id, {}),
         }
         for command_id, spec in command_specs().items()
     }
@@ -114,6 +142,7 @@ def validate_command_args(
     *,
     workdir: Path,
     validation_mode: Literal["runtime", "schema"] = "runtime",
+    path_checks: PathChecks | None = None,
 ) -> list[str]:
     specs = command_specs()
     if command_id not in specs:
@@ -122,6 +151,7 @@ def validate_command_args(
         raise CommandPolicyError("Command arguments must be a JSON list.")
 
     spec = specs[command_id]
+    checks = path_checks or PathChecks(workdir, validation_mode)
     argv: list[str] = []
     for raw in args or []:
         if not isinstance(raw, (str, int, float, bool)):
@@ -134,22 +164,54 @@ def validate_command_args(
         argv.append(value)
 
     if spec.python_script_only:
-        return _validate_python_argv(argv, workdir, validation_mode)
-    else:
-        for index, value in enumerate(argv):
-            if _looks_like_path(value):
-                resolved = require_allowed_path(
-                    value,
-                    base=workdir,
-                    must_exist=validation_mode == "runtime" and Path(value).suffix.lower() not in {".out", ".res"},
-                )
-                normalized = str(resolved)
-                if spec.wrapper == "batch" and _BATCH_META_RE.search(normalized):
-                    raise CommandPolicyError(
-                        f"Batch command path contains unsupported metacharacters: {normalized!r}"
-                    )
-                argv[index] = normalized
+        return _validate_python_argv(argv, checks)
+    for index, prefix, value, role in _path_arguments(command_id, argv):
+        resolved = checks.resolve(
+            value, input_file=role == "input", expect_file=False if role == "directory" else True
+        )
+        if resolved is None:
+            continue
+        normalized = prefix + str(resolved)
+        if spec.wrapper == "batch" and _BATCH_META_RE.search(normalized):
+            raise CommandPolicyError(f"Batch command path contains unsupported metacharacters: {normalized!r}")
+        argv[index] = normalized
     return argv
+
+
+def command_output_paths(command_id: str, args: list[Any]) -> list[str]:
+    return [value for _, _, value, role in _path_arguments(command_id, [str(arg) for arg in args]) if role == "output"]
+
+
+def _path_arguments(command_id: str, argv: list[str]):
+    options = _PATH_OPTIONS.get(command_id, {})
+    pending: str | None = None
+    for index, value in enumerate(argv):
+        if pending:
+            if value.startswith("-") and not re.match(r"^-\d", value):
+                raise CommandPolicyError("Missing path argument before " + value)
+            yield index, "", value.strip('"'), pending
+            pending = None
+            continue
+        assignment = _OPTION_ASSIGNMENT_RE.fullmatch(value)
+        if assignment:
+            flag, argument = assignment.groups()
+            if command_id == "spaceclaim" and flag.casefold() == "/scriptargs":
+                continue
+            role = options.get(flag.casefold())
+            if role or _looks_like_path(argument):
+                if not argument:
+                    raise CommandPolicyError(f"Missing path for {flag}")
+                yield index, flag + "=", argument.strip('"'), role or "input"
+            continue
+        if value.casefold() in options:
+            pending = options[value.casefold()]
+        elif command_id == "spaceclaim" and re.fullmatch(r"/[A-Za-z][A-Za-z0-9_-]*", value):
+            continue
+        elif _looks_like_path(value):
+            role = "output" if Path(value).suffix.lower() in {".out", ".res"} else "input"
+            yield index, "", value.strip('"'), role
+    if pending:
+        raise CommandPolicyError("Missing final path argument.")
 
 
 def command_argv(command_id: str, args: list[Any] | None = None) -> list[str]:
@@ -163,23 +225,21 @@ def command_argv(command_id: str, args: list[Any] | None = None) -> list[str]:
     return [str(spec.executable), *argv]
 
 
-def _validate_python_argv(argv: list[str], workdir: Path, validation_mode: str) -> list[str]:
+def _validate_python_argv(argv: list[str], checks: PathChecks) -> list[str]:
     if not argv:
         raise CommandPolicyError("ansys_python requires an allowed .py script path.")
     if argv[0] in {"-c", "-m", "-"} or any(value in {"-c", "-m"} for value in argv):
         raise CommandPolicyError("ansys_python only accepts script files; -c, -m, and stdin are disabled.")
-    script = require_allowed_path(
-        argv[0],
-        base=workdir,
-        must_exist=validation_mode == "runtime",
-        expect_file=True,
-    )
-    if script.suffix.lower() != ".py":
+    script = checks.resolve(argv[0], input_file=True, expect_file=True)
+    if script is not None and script.suffix.lower() != ".py":
         raise CommandPolicyError(f"ansys_python script must use the .py extension: {script}")
-    argv[0] = str(script)
+    if script is not None:
+        argv[0] = str(script)
     for index, value in enumerate(argv[1:], start=1):
         if _looks_like_path(value):
-            argv[index] = str(require_allowed_path(value, base=workdir, must_exist=False))
+            resolved = checks.resolve(value)
+            if resolved is not None:
+                argv[index] = str(resolved)
     return argv
 
 

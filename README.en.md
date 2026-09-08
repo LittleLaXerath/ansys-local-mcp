@@ -65,6 +65,11 @@ Workflow v1 rejects unknown fields, empty step lists, duplicate step IDs, path
 traversal IDs, non-positive timeouts, and malformed product recipes before any
 Ansys application starts.
 
+Read MCP resources `ansys://schema/workflow` and
+`ansys://schema/workbench-recipe` for complete field rules, or call
+`inspect_runtime(include_schema=True)` when resources are unavailable.
+These schemas come directly from Pydantic. The tool count remains 12.
+
 ## MCP Tools
 
 Stable general tools:
@@ -118,6 +123,18 @@ Every step returns an `outputs` object. Later steps can reference it with
 `${steps.<id>.outputs.<field>}`. Existing `${variable}` substitution remains
 supported.
 
+Declare script outputs with `produces`, for example
+`"produces": [{"path": "output/model.def", "required": true}]`.
+Later steps may consume these files before they exist at validation time.
+Required outputs are checked after the producing step, and inputs are checked
+again before use. File-write/copy targets and known command output paths are
+inferred automatically. Undeclared missing inputs, unknown step references,
+and forward references fail before workflow mutation.
+
+Product processes receive `ANSYS_MCP_WORKDIR` and `ANSYS_MCP_RUN_DIR` to
+locate files independently of the editor's own working directory. SpaceClaim
+path options are normalized while switches such as `/Headless=True` stay intact.
+
 `validate_workflow(validation_mode="schema")` validates portable structure
 without requiring Ansys executables. The default `runtime` mode also verifies
 the discovered runtime and executable availability. Neither mode launches
@@ -134,6 +151,10 @@ store Workbench handles with `store_as`, then reference them through `target`:
   "type": "workbench",
   "mode": "batch",
   "recipe": {
+    "project": {
+      "open_path": "inputs/project.wbpj",
+      "save_path": "outputs/project.wbpj"
+    },
     "actions": [
       {"op": "get_system", "name": "CFX", "store_as": "cfx"},
       {
@@ -160,7 +181,18 @@ Product scripts must be files under allowed roots. Inline `code` is disabled by
 default; set `ANSYS_MCP_ALLOW_INLINE_CODE=1` to opt in. Inline content is first
 written into the run directory so it remains auditable.
 
-See [the full-suite example](examples/workbench_recipe.example.json).
+Serializable results saved with `store_as` return in `outputs.values`, for
+example `${steps.setup.outputs.values.physics_status}`. Product object handles
+remain local to the recipe. Success requires the final completion marker and
+all expected action results, not just a zero process exit code.
+
+See the [SpaceClaim geometry workflow](examples/workbench_recipe.example.json),
+its [direct route](examples/spaceclaim_direct.example.json), and the
+[existing-project CFX workflow](examples/cfx_workbench.example.json).
+SpaceClaim creates a rectangular fluid body, named boundaries, native/STEP
+exports and volume measurements. CFX changes existing turbulence settings and
+returns `PhysicsStatus`; it does not create a mesh or solve. See
+[prerequisites and verification limits](examples/README.md).
 
 ## PyFluent
 

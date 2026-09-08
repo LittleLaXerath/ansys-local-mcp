@@ -29,6 +29,7 @@ from .schemas import (
     WorkbenchAction,
     WorkbenchRecipe,
 )
+from .workflow_paths import PathChecks
 
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -80,17 +81,22 @@ def load_workbench_recipe(
     raise WorkbenchRecipeError("Workbench step requires recipe or recipe_path.")
 
 
-def validate_workbench_recipe_paths(recipe: WorkbenchRecipe, workdir: Path) -> None:
+def validate_workbench_recipe_paths(
+    recipe: WorkbenchRecipe, workdir: Path, *, path_checks: PathChecks | None = None
+) -> None:
+    checks = path_checks or PathChecks(workdir)
     if recipe.project.open_path:
-        require_allowed_file(recipe.project.open_path, base=workdir)
+        checks.resolve(recipe.project.open_path, input_file=True, expect_file=True)
     if recipe.project.save_path:
-        require_allowed_path(recipe.project.save_path, base=workdir, must_exist=False)
+        save_path = checks.resolve(recipe.project.save_path, expect_file=True)
+        if checks.mode == "runtime" and save_path and save_path.exists() and not recipe.project.overwrite:
+            raise WorkbenchRecipeError(f"Project output already exists; overwrite is false: {save_path}")
     for index, action in enumerate(recipe.actions):
         action_id = action.id or f"action_{index + 1}"
         script_path = getattr(action, "script_path", None)
         code = getattr(action, "code", None)
         if script_path:
-            require_allowed_file(script_path, base=workdir)
+            checks.resolve(script_path, input_file=True, expect_file=True)
         if code is not None and not inline_code_allowed():
             raise WorkbenchRecipeError(
                 "Inline Workbench product code is disabled. Set ANSYS_MCP_ALLOW_INLINE_CODE=1 to enable it.",
@@ -121,17 +127,18 @@ def compile_workbench_recipe(
         if script:
             generated_scripts.append(script)
         should_continue = recipe.continue_on_error if action.continue_on_error is None else action.continue_on_error
-        lines.extend(_wrapped_statement(action_id, action.op, statement, bool(should_continue)))
+        lines.extend(_wrapped_statement(action_id, action.op, statement, bool(should_continue), getattr(action, "store_as", None)))
 
     if recipe.project.save_path:
         save_path = require_allowed_path(recipe.project.save_path, base=workdir, must_exist=False)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
         statement = (
             f"Save(FilePath={_literal(str(save_path))}, "
             f"Overwrite={_literal(recipe.project.overwrite)})"
         )
         lines.extend(_wrapped_statement("project_save", "save_project", statement, False))
 
-    lines.extend(["_status['ok'] = all(item['ok'] for item in _status['actions'])", "_write_result()", ""])
+    lines.extend(["_status['ok'] = all(item['ok'] for item in _status['actions'])", "_status['completed'] = True", "_write_result()", ""])
     journal_path.write_text("\n".join(lines), encoding="utf-8")
     return PreparedWorkbenchRecipe(recipe, journal_path, result_path, tuple(generated_scripts))
 
@@ -146,6 +153,30 @@ def read_workbench_result(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def validate_workbench_result(payload: dict[str, Any] | None, recipe: WorkbenchRecipe) -> str | None:
+    if not payload:
+        return "Workbench did not produce a structured result file."
+    actions = payload.get("actions")
+    if not isinstance(actions, list) or any(not isinstance(action, dict) for action in actions):
+        return "Workbench returned malformed action results."
+    failures = [action for action in actions if action.get("ok") is False]
+    if failures:
+        return "; ".join(f"Action {action.get('id')} ({action.get('op')}): {action.get('error')}" for action in failures)
+    expected = [(action.id or f"action_{index + 1}", action.op) for index, action in enumerate(recipe.actions)]
+    if recipe.project.open_path:
+        expected.insert(0, ("project_open", "open_project"))
+    if recipe.project.save_path:
+        expected.append(("project_save", "save_project"))
+    actual = [(action.get("id"), action.get("op")) for action in actions]
+    if payload.get("completed") is not True or actual != expected:
+        return "Workbench recipe did not complete all expected actions."
+    if payload.get("ok") is not True or any(action.get("ok") is not True for action in actions):
+        return "Workbench returned an inconsistent success status."
+    if not isinstance(payload.get("outputs"), dict):
+        return "Workbench result is missing its outputs object."
+    return None
+
+
 def _journal_header(result_path: Path, script_version: str) -> list[str]:
     return [
         "# encoding: utf-8",
@@ -153,17 +184,26 @@ def _journal_header(result_path: Path, script_version: str) -> list[str]:
         "import json",
         "import traceback",
         f"_RESULT_PATH = {_literal(str(result_path))}",
-        "_status = {'ok': True, 'actions': []}",
+        "_handles = {}",
+        "_status = {'ok': False, 'completed': False, 'actions': [], 'outputs': {}}",
         "def _write_result():",
         "    _stream = open(_RESULT_PATH, 'w')",
         "    try:",
         "        json.dump(_status, _stream, indent=2)",
         "    finally:",
         "        _stream.close()",
-        "def _record(_id, _op, _ok, _error=None):",
-        "    _status['actions'].append({'id': _id, 'op': _op, 'ok': _ok, 'error': _error})",
-        "    if not _ok:",
-        "        _status['ok'] = False",
+        "def _record(_id, _op, _ok, _error=None, _store_as=None):",
+        "    _item = {'id': _id, 'op': _op, 'ok': _ok, 'error': _error}",
+        "    if _ok and _store_as is not None:",
+        "        _value = _handles[_store_as]",
+        "        try:",
+        "            _value = json.loads(json.dumps(_value, allow_nan=False))",
+        "            _status['outputs'][_store_as] = _value",
+        "            _item['value_available'] = True",
+        "        except (TypeError, ValueError, OverflowError):",
+        "            _item['value_available'] = False",
+        "        _item['store_as'] = _store_as",
+        "    _status['actions'].append(_item)",
         "    _write_result()",
         "def _read_script(_path):",
         "    _stream = open(_path, 'rb')",
@@ -180,10 +220,12 @@ def _journal_header(result_path: Path, script_version: str) -> list[str]:
     ]
 
 
-def _wrapped_statement(action_id: str, op: str, statement: str, should_continue: bool) -> list[str]:
+def _wrapped_statement(
+    action_id: str, op: str, statement: str, should_continue: bool, store_as: str | None = None
+) -> list[str]:
     lines = ["try:"]
     lines.extend(f"    {line}" for line in statement.splitlines())
-    lines.append(f"    _record({_literal(action_id)}, {_literal(op)}, True)")
+    lines.append(f"    _record({_literal(action_id)}, {_literal(op)}, True, _store_as={_literal(store_as)})")
     lines.extend(
         [
             "except Exception as _exc:",
@@ -206,26 +248,26 @@ def _render_action(
         kwargs = {"TemplateName": action.template_name}
         if action.solver is not None:
             kwargs["Solver"] = action.solver
-        return f"{action.store_as} = GetTemplate({_render_kwargs(kwargs)})", None
+        return f"{_handle(action.store_as)} = GetTemplate({_render_kwargs(kwargs)})", None
     if isinstance(action, CreateSystemAction):
         call = _render_call(action.template, "CreateSystem", action.args, action.kwargs)
-        return f"{action.store_as} = {call}", None
+        return f"{_handle(action.store_as)} = {call}", None
     if isinstance(action, GetSystemAction):
-        return f"{action.store_as} = GetSystem(Name={_literal(action.name)})", None
+        return f"{_handle(action.store_as)} = GetSystem(Name={_literal(action.name)})", None
     if isinstance(action, GetComponentAction):
-        return f"{action.store_as} = {action.target}.GetComponent(Name={_literal(action.name)})", None
+        return f"{_handle(action.store_as)} = {_handle(action.target)}.GetComponent(Name={_literal(action.name)})", None
     if isinstance(action, GetContainerAction):
         return (
-            f"{action.store_as} = {action.target}.GetContainer(ComponentName={_literal(action.component_name)})",
+            f"{_handle(action.store_as)} = {_handle(action.target)}.GetContainer(ComponentName={_literal(action.component_name)})",
             None,
         )
     if isinstance(action, CallAction):
         call = _render_call(action.target, action.method, action.args, action.kwargs)
-        return (f"{action.store_as} = {call}" if action.store_as else call), None
+        return (f"{_handle(action.store_as)} = {call}" if action.store_as else call), None
     if isinstance(action, GetAttrAction):
-        return f"{action.store_as} = getattr({action.target}, {_literal(action.attribute)})", None
+        return f"{_handle(action.store_as)} = getattr({_handle(action.target)}, {_literal(action.attribute)})", None
     if isinstance(action, SetAttrAction):
-        return f"setattr({action.target}, {_literal(action.attribute)}, {_literal(action.value)})", None
+        return f"setattr({_handle(action.target)}, {_literal(action.attribute)}, {_literal(action.value)})", None
     if isinstance(action, (SendCommandAction, RunScriptAction)):
         script_path = _materialize_script(action, action_id, workdir, run_dir)
         if isinstance(action, SendCommandAction):
@@ -234,11 +276,11 @@ def _render_action(
             }
             if action.language:
                 kwargs["Language"] = action.language
-            call = f"{action.target}.SendCommand({_render_kwargs(kwargs)})"
+            call = f"{_handle(action.target)}.SendCommand({_render_kwargs(kwargs)})"
         else:
-            call = f"{action.target}.RunScript(ScriptFile={_literal(str(script_path))})"
+            call = f"{_handle(action.target)}.RunScript(ScriptFile={_literal(str(script_path))})"
         store_as = getattr(action, "store_as", None)
-        return (f"{store_as} = {call}" if store_as else call), script_path if action.code is not None else None
+        return (f"{_handle(store_as)} = {call}" if store_as else call), script_path if action.code is not None else None
     raise WorkbenchRecipeError(f"Unsupported Workbench action: {action.op}", action_id)
 
 
@@ -272,7 +314,11 @@ def _render_call(target: str, method: str, args: list[Any], kwargs: dict[str, An
         if not _IDENTIFIER_RE.fullmatch(key):
             raise WorkbenchRecipeError(f"Invalid Workbench keyword name: {key}")
         rendered.append(f"{key}={_literal(value)}")
-    return f"{target}.{method}({', '.join(rendered)})"
+    return f"{_handle(target)}.{method}({', '.join(rendered)})"
+
+
+def _handle(name: str) -> str:
+    return f"_handles[{_literal(name)}]"
 
 
 def _render_kwargs(kwargs: dict[str, Any]) -> str:
@@ -292,7 +338,7 @@ def _literal(value: Any) -> str:
             reference = value["$ref"]
             if not isinstance(reference, str) or not _IDENTIFIER_RE.fullmatch(reference):
                 raise WorkbenchRecipeError(f"Invalid Workbench reference: {reference!r}")
-            return reference
+            return _handle(reference)
         return "{" + ", ".join(f"{_literal(str(key))}: {_literal(child)}" for key, child in value.items()) + "}"
     if isinstance(value, list):
         return "[" + ", ".join(_literal(child) for child in value) + "]"
