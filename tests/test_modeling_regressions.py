@@ -231,9 +231,12 @@ class SchemaDiscoveryTests(unittest.TestCase):
     def test_client_can_read_schemas_without_new_tools(self):
         from ansys_mcp.server import mcp, inspect_runtime
 
-        self.assertEqual(len(asyncio.run(mcp.list_tools())), 12)
+        tool_names = {tool.name for tool in asyncio.run(mcp.list_tools())}
+        self.assertTrue({"run_workflow", "validate_workflow", "inspect_runtime", "start_workflow", "get_workflow_status", "cancel_workflow", "query_capabilities"}.issubset(tool_names))
         resources = asyncio.run(mcp.list_resources())
         self.assertIn("ansys://schema/workflow", {str(resource.uri) for resource in resources})
+        self.assertIn("ansys://schema/mechanical-recipe", {str(resource.uri) for resource in resources})
+        self.assertIn("ansys://schema/dpf-recipe", {str(resource.uri) for resource in resources})
         result = inspect_runtime(include_schema=True)
         schema = result["schemas"]["workflow"]
         self.assertIn("produces", schema["$defs"]["WorkbenchStep"]["properties"])
@@ -295,19 +298,19 @@ class ModelingExampleTests(unittest.TestCase):
         self.assertEqual(result["boundary_face_counts"], {"inlet": 1, "outlet": 1, "wall": 4})
         self.assertEqual(set(groups), {"fluid", "inlet", "outlet", "wall"})
         self.assertEqual(len(model.Bodies), 1)
-        self.assertTrue((self.output / "channel.scdoc").is_file())
+        self.assertTrue((self.output / "channel.scdocx").is_file())
         self.assertTrue((self.output / "channel.step").is_file())
 
     def test_geometry_script_rejects_wrong_volume_without_success_artifacts(self):
         with self.assertRaisesRegex(RuntimeError, "volume"):
             self.run_geometry_script(volume_scale=2)
         self.assertFalse((self.output / "measurements.json").exists())
-        self.assertFalse((self.output / "channel.scdoc").exists())
+        self.assertFalse((self.output / "channel.scdocx").exists())
 
     def test_geometry_script_preserves_existing_models_and_files(self):
         with self.assertRaisesRegex(ValueError, "empty document"):
             self.run_geometry_script(existing_body=True)
-        native = self.output / "channel.scdoc"
+        native = self.output / "channel.scdocx"
         native.write_text("keep")
         with self.assertRaisesRegex(ValueError, "already exists"):
             self.run_geometry_script()
@@ -323,6 +326,13 @@ class ModelingExampleTests(unittest.TestCase):
             for path in (PROJECT / "examples").glob("*.example.json"):
                 if path.name == "fluent_recipe.example.json":
                     continue  # This file is a legacy recipe, not a workflow.
+                if path.name == "dpf_recipe.example.json":
+                    from ansys_mcp.dpf_schema import DPFRecipe
+                    from ansys_mcp.dpf import validate_dpf_recipe_paths
+                    from ansys_mcp.workflow_paths import PathChecks
+                    recipe = DPFRecipe.model_validate(json.loads(path.read_text(encoding="utf-8")))
+                    validate_dpf_recipe_paths(recipe, PROJECT, path_checks=PathChecks(PROJECT, mode="schema"))
+                    continue
                 with self.subTest(example=path.name):
                     result = validate_workflow(workflow_path=str(path), validation_mode="schema")
                     self.assertTrue(result["ok"], result)

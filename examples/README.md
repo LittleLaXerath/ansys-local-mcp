@@ -4,12 +4,13 @@
 
 ## Verification / 验证范围
 
-Workflows are checked in `validation_mode="schema"`. Tests use fake product
-objects, not real Ansys sessions. The new scripts contain actual operations,
-but have not yet been verified against a real Ansys installation.
+Workflows are checked in `validation_mode="schema"`. Default tests use fake
+product objects and ordinary worker processes. Separate opt-in product tests
+use fresh generated projects; measured support is listed in
+[the validation report](../docs/validation.md).
 
-自动测试使用模拟产品对象，不会启动 Ansys。新脚本已有实际操作，但尚未完成真实产品验证；
-不能把 Schema 通过理解为建模、网格或求解成功。
+默认测试使用模拟产品对象和普通工作进程；真实产品验收单独显式运行，采用新生成的隔离工程。
+已测范围见[验收记录](../docs/validation.md)。Schema 通过不等于建模、网格或求解成功。
 
 Set allowed roots to include the examples and inputs. A workflow file's relative
 workdir is resolved from its directory. Other server-managed paths are relative
@@ -30,7 +31,7 @@ The script creates a rectangular fluid body and named selections `fluid`,
 `inlet`, `outlet`, and `wall`. Dimensions default to 100 x 20 x 10 mm;
 override `length_mm`, `width_mm`, and `height_mm` using workflow variables.
 It checks body count, face counts and measured volume, then exports:
-`channel.scdoc`, `channel.step`, and `measurements.json` under
+`channel.scdocx`, `channel.step`, and `measurements.json` under
 `<workdir>/.ansys_mcp/spaceclaim-example/`. Workbench also saves `model.wbpj`.
 
 The two routes share this output directory. Archive previous outputs before
@@ -77,11 +78,24 @@ not claim to create a complete simulation from raw geometry.
   checks, not modeling.
 - [fluent_recipe.example.json](fluent_recipe.example.json): legacy PyFluent
   template requiring your case and zone names.
-- `scripts/fluent_setup.jou` and `scripts/mechanical_setup.py` are explicitly
-  marked placeholders, not completed simulation setups.
+- `scripts/fluent_setup.jou` remains a placeholder requiring a real case.
+- `scripts/mechanical_setup.py` reads model/analysis metadata; it does not solve.
+- [mechanical.example.json](mechanical.example.json) and
+  [mechanical_workbench.example.json](mechanical_workbench.example.json)
+  demonstrate structured object/session operations.
+- [dpf_recipe.example.json](dpf_recipe.example.json) is a standalone DPF recipe.
+- `tools/run_product_acceptance.py` explicitly runs isolated physical benchmarks;
+  its original native files and logs stay in the ignored run directory.
+- `tools/run_contact_parameters.py`, `tools/run_result_exports.py` and
+  `tools/run_specialized_acceptance.py` are opt-in source-checkout runners.
+- `scripts/engineering_data_acceptance.py` runs in the client Python interpreter
+  and only prepares a workflow for a synthetic material round trip. Execute the
+  generated workflow separately after reviewing its paths and unique body selection;
+  it is not a script to send directly into Mechanical.
 
 其他示例分别用于文件操作、旧入口、启动检查和 PyFluent 模板。
-Fluent 与 Mechanical 占位脚本不代表已完成仿真设置。
+Fluent 脚本仍需真实案例配置；Mechanical 元数据脚本不代表完整仿真设置。
+材料往返示例是客户端工作流生成器，生成后另行执行，不应作为 Mechanical 产品内脚本发送。
 
 ## Official Interfaces / 官方接口
 

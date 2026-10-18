@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ansys-local-mcp"
-version = "0.2.1"
+version = "0.3.0"
 description = "Experimental local MCP server for orchestrating Ansys workflows through Workbench and direct product commands."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -27,7 +27,15 @@ classifiers = [
 dependencies = [
   "mcp[cli]>=1,<2",
   "pydantic>=2,<3",
+  "ansys-workbench-core>=0.14,<0.15; sys_platform == 'win32'",
+  "ansys-mechanical-core>=0.12.12,<0.13",
+  "ansys-mechanical-stubs>=0.1.12,<0.2",
+  "ansys-dpf-core>=0.16.3,<0.17",
+  "psutil>=6,<8",
 ]
+
+[project.optional-dependencies]
+dev = ["build>=1.2,<2"]
 
 [project.urls]
 Homepage = "https://github.com/LittleLaXerath/ansys-local-mcp"
@@ -35,6 +43,7 @@ Issues = "https://github.com/LittleLaXerath/ansys-local-mcp/issues"
 
 [project.scripts]
 ansys-local-mcp = "ansys_mcp.server:main"
+ansys-mcp-check-publication = "ansys_mcp.publication:main"
 
 [tool.setuptools]
 packages = ["ansys_mcp"]

@@ -6,6 +6,7 @@ import re
 import shutil
 import time
 import uuid
+from importlib import metadata
 from pathlib import Path
 from typing import Any, Literal
 
@@ -31,7 +32,7 @@ from .config import (
     require_allowed_path,
     safe_workdir,
 )
-from .process_supervisor import ProcessResult, run_process
+from .process_supervisor import ProcessResult, WorkflowCancelled, current_cancellation_token, run_process
 from .pyfluent_operations import (
     COMPATIBILITY_ALIASES,
     PRIMITIVE_OPERATIONS,
@@ -50,6 +51,8 @@ from .schemas import (
     WORKFLOW_STEP_ADAPTER,
     WorkbenchRecipe,
     WorkbenchStep,
+    MechanicalStep,
+    DPFStep,
     WorkflowModel,
     effective_step_id,
 )
@@ -77,8 +80,9 @@ ERROR_PYFLUENT_OPERATION = "PYFLUENT_OPERATION_ERROR"
 ERROR_WORKBENCH_RECIPE = "WORKBENCH_RECIPE_ERROR"
 ERROR_INLINE_CODE_DISABLED = "INLINE_CODE_DISABLED"
 ERROR_ARTIFACT_MISSING = "ARTIFACT_MISSING"
+ERROR_WORKFLOW_CANCELLED = "WORKFLOW_CANCELLED"
 
-STEP_TYPES = ("command", "python_script", "pyfluent", "workbench", "file", "assert", "collect")
+STEP_TYPES = ("command", "python_script", "pyfluent", "workbench", "mechanical", "dpf", "file", "assert", "collect")
 DEFAULT_RETRY_CODES = {ERROR_PROCESS_LAUNCH, ERROR_PROCESS_TIMEOUT, ERROR_PROCESS_NONZERO}
 _VARIABLE_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 _STEP_REF_PATTERN = STEP_REF_PATTERN
@@ -111,6 +115,7 @@ def inspect_runtime(include_schema: bool = False) -> dict[str, Any]:
     if roots.invalid:
         warnings.append("Invalid allowed roots: " + "; ".join(roots.invalid))
     result = {
+        "package_version": __import__("ansys_mcp").__version__,
         "ansys_root": str(installation.root) if installation.root else None,
         "resolved_root": str(installation.root) if installation.root else None,
         "version_tag": installation.version_tag,
@@ -135,6 +140,8 @@ def inspect_runtime(include_schema: bool = False) -> dict[str, Any]:
             "schema_resources": {
                 "workflow": "ansys://schema/workflow",
                 "workbench_recipe": "ansys://schema/workbench-recipe",
+                "mechanical_recipe": "ansys://schema/mechanical-recipe",
+                "dpf_recipe": "ansys://schema/dpf-recipe",
             },
         },
         "pyfluent_core": {
@@ -142,10 +149,24 @@ def inspect_runtime(include_schema: bool = False) -> dict[str, Any]:
             "exists": paths["pyfluent_core"].exists(),
         },
     }
+    result["dependencies"] = {}
+    for package in ("ansys-workbench-core", "ansys-mechanical-core", "ansys-mechanical-stubs", "ansys-dpf-core"):
+        try:
+            result["dependencies"][package] = {"installed": True, "version": metadata.version(package)}
+        except metadata.PackageNotFoundError:
+            result["dependencies"][package] = {"installed": False, "version": None}
+    from .capabilities import capability_catalog_summary
+    result["mechanical_catalog"] = capability_catalog_summary(installation.version_tag)
+    from .mechanical import session_summary
+    result["mechanical_sessions"] = session_summary()
     if include_schema:
+        from .mechanical_schema import MechanicalRecipe
+        from .dpf_schema import DPFRecipe
         result["schemas"] = {
             "workflow": WorkflowModel.model_json_schema(),
             "workbench_recipe": WorkbenchRecipe.model_json_schema(),
+            "mechanical_recipe": MechanicalRecipe.model_json_schema(),
+            "dpf_recipe": DPFRecipe.model_json_schema(),
         }
     return result
 
@@ -223,6 +244,7 @@ def run_workflow(
         deadline = time.monotonic() + float(timeout_seconds)
         result_context: dict[str, dict[str, Any]] = {}
         for index, original_step in enumerate(model.steps):
+            _check_cancellation()
             step_id = effective_step_id(original_step, index)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -253,14 +275,33 @@ def run_workflow(
                 run_dir,
                 _summary(run_id, not _has_errors(diagnostics), "running", started, step_results, [], diagnostics, run_dir),
             )
+            if result.get("status") == "unknown":
+                # The product request is still being observed. Even a workflow
+                # configured to continue on error must not advance past it.
+                break
             if not result.get("ok", False) and not _should_continue(model, resolved_step if remaining > 0 else original_step):
                 break
 
-        artifacts = _resolve_and_collect_artifacts(model.artifacts, cwd, result_context)
+        unknown = any(step.get("status") == "unknown" for step in step_results)
+        # Outputs of later, unexecuted steps do not exist yet. Their artifact
+        # references must not replace the active product's unknown outcome.
+        artifacts = [] if unknown else _resolve_and_collect_artifacts(model.artifacts, cwd, result_context)
         diagnostics.extend(_artifact_diagnostics(artifacts))
         ok = not _has_errors(diagnostics) and all(step.get("ok", False) for step in step_results)
-        status = "complete" if ok else ("timeout" if _has_code(diagnostics, ERROR_PROCESS_TIMEOUT) else "failed")
+        if unknown:
+            status = "unknown"
+        elif ok:
+            status = "complete"
+        elif _has_code(diagnostics, ERROR_WORKFLOW_CANCELLED):
+            status = "cancelled"
+        elif _has_code(diagnostics, ERROR_PROCESS_TIMEOUT) or any(step.get("status") in {"timeout", "timed_out"} for step in step_results):
+            status = "timeout"
+        else:
+            status = "failed"
         summary = _summary(run_id, ok, status, started, step_results, artifacts, diagnostics, run_dir)
+    except WorkflowCancelled:
+        diagnostics.append(_diagnostic(ERROR_WORKFLOW_CANCELLED, "Workflow cancellation requested."))
+        summary = _summary(run_id, False, "cancelled", started, step_results, [], diagnostics, run_dir)
     except WorkflowProblem as exc:
         diagnostics.append(exc.diagnostic())
         summary = _summary(run_id, False, "failed", started, step_results, [], diagnostics, run_dir)
@@ -277,6 +318,10 @@ def run_workflow(
         diagnostics.append(_diagnostic(ERROR_VALIDATION, repr(exc)))
         summary = _summary(run_id, False, "failed", started, step_results, [], diagnostics, run_dir)
 
+    if any(step.get("status") == "unknown" for step in step_results):
+        # Exception and cancellation aggregation must retain the original
+        # observation handles, rather than inventing a product terminal state.
+        summary.update(ok=False, status="unknown", stage="unknown")
     if run_dir is not None:
         _write_manifest_atomic(run_dir, summary)
     return summary
@@ -420,6 +465,16 @@ def _validate_step(
         diagnostics.extend(_validate_pyfluent_step(step, step_id, cwd, mode, checks))
     elif isinstance(step, WorkbenchStep):
         diagnostics.extend(_validate_workbench_step(step, step_id, cwd, mode, checks, seen))
+    elif isinstance(step, MechanicalStep):
+        from .mechanical import validate_mechanical_recipe_paths
+        validate_mechanical_recipe_paths(step.recipe, cwd, path_checks=checks)
+        if step.retry.max_attempts != 1:
+            raise WorkflowProblem(ERROR_VALIDATION, "Mechanical recipes must not be automatically replayed; reconcile product state before retrying.", step_id)
+    elif isinstance(step, DPFStep):
+        from .dpf import validate_dpf_recipe_paths
+        validate_dpf_recipe_paths(step.recipe, cwd, path_checks=checks)
+        if step.retry.max_attempts != 1:
+            raise WorkflowProblem(ERROR_VALIDATION, "DPF recipes may write artifacts and must not be automatically replayed.", step_id)
     elif isinstance(step, FileStep):
         _validate_file_step(step, checks)
     elif isinstance(step, AssertStep):
@@ -440,6 +495,12 @@ def _produced_paths(step: BaseWorkflowStep) -> list[str]:
         paths.extend(command_output_paths(step.command_id, step.args))
     elif isinstance(step, WorkbenchStep) and step.recipe and step.recipe.project.save_path:
         paths.append(step.recipe.project.save_path)
+    elif isinstance(step, MechanicalStep):
+        from .mechanical import mechanical_produced_paths
+        paths.extend(mechanical_produced_paths(step.recipe))
+    elif isinstance(step, DPFStep):
+        from .dpf import dpf_produced_paths
+        paths.extend(dpf_produced_paths(step.recipe))
     elif isinstance(step, PyFluentStep):
         if step.write:
             paths.extend(step.write.model_dump(exclude_none=True).values())
@@ -581,6 +642,7 @@ def _run_step_with_retry(
     attempts: list[dict[str, Any]] = []
     retry_codes = set(step.retry.retry_on_codes) or DEFAULT_RETRY_CODES
     for attempt in range(1, step.retry.max_attempts + 1):
+        _check_cancellation()
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             result = _error_step(
@@ -641,6 +703,21 @@ def _run_step_once(
             return _run_pyfluent_step(step, step_id, cwd, run_dir, timeout_seconds, attempt, started)
         if isinstance(step, WorkbenchStep):
             return _run_workbench_step(step, step_id, cwd, run_dir, timeout_seconds, attempt, started)
+        if isinstance(step, (MechanicalStep, DPFStep)):
+            if isinstance(step, MechanicalStep):
+                from .mechanical import run_mechanical_recipe as run_domain_recipe
+            else:
+                from .dpf import run_dpf_recipe as run_domain_recipe
+            domain = run_domain_recipe(step.recipe, workdir=cwd, run_dir=run_dir, timeout_seconds=timeout_seconds)
+            result = _ok_step(step_id, step.type, started, {"outputs": domain.get("outputs", {})})
+            result.update(domain)
+            if result.get("status") == "timed_out":
+                result["status"] = "timeout"
+            result.update(id=step_id, type=step.type, elapsed_s=round(time.monotonic()-started, 3))
+            result.setdefault("diagnostics", [])
+            if not result.get("ok", False) and not result["diagnostics"]:
+                result["diagnostics"] = [_diagnostic(ERROR_VALIDATION, "Product recipe failed; inspect operation results.", step_id)]
+            return result
         if isinstance(step, FileStep):
             return _run_file_step(step, step_id, cwd, started)
         if isinstance(step, AssertStep):
@@ -654,6 +731,10 @@ def _run_step_once(
                 result["diagnostics"] = diagnostics
             return result
         raise WorkflowProblem(ERROR_VALIDATION, f"Unsupported step type: {step.type}", step_id)
+    except WorkflowCancelled:
+        result = _error_step(step_id, step.type, started, ERROR_WORKFLOW_CANCELLED, "Workflow cancellation requested.")
+        result["status"] = "cancelled"
+        return result
     except WorkflowProblem as exc:
         return _error_step(step_id, step.type, started, exc.code, exc.message)
     except ConfigurationError as exc:
@@ -834,6 +915,25 @@ def _run_environment(cwd: Path, run_dir: Path) -> dict[str, str]:
     env["ANSYS_MCP_WORKDIR"] = str(cwd)
     env["ANSYS_MCP_RUN_DIR"] = str(run_dir)
     return env
+
+
+def _check_cancellation() -> None:
+    token = current_cancellation_token()
+    if token is not None:
+        token.raise_if_cancelled()
+
+
+def worker_dispatch(operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Authenticated execution-worker entry point for an explicit workflow.
+
+    The private worker supplies the same allowed-root snapshot. There is no
+    automatic escalation or replay through this handler.
+    """
+    if operation != "run_workflow":
+        raise ValueError("Unsupported workflow worker operation.")
+    if not isinstance(payload, dict) or set(payload) - {"workflow", "variables", "timeout_seconds"}:
+        raise ValueError("Invalid workflow worker request.")
+    return run_workflow(workflow=payload.get("workflow"), variables=payload.get("variables"), timeout_seconds=payload.get("timeout_seconds", 7200))
 
 
 def _run_assert_step(step: AssertStep, step_id: str, cwd: Path, started: float) -> dict[str, Any]:
@@ -1092,8 +1192,8 @@ def _process_step_result(
     result = {
         "id": step_id,
         "type": step_type,
-        "ok": process.detached or (not process.timed_out and process.returncode == 0),
-        "status": "launched" if process.detached else ("timeout" if process.timed_out else "complete"),
+        "ok": process.detached or (not process.timed_out and not process.cancelled and process.returncode == 0),
+        "status": "launched" if process.detached else ("cancelled" if process.cancelled else ("timeout" if process.timed_out else "complete")),
         "returncode": process.returncode,
         "pid": process.pid,
         "command_id": command_id,
@@ -1107,7 +1207,10 @@ def _process_step_result(
         "outputs": outputs,
         "diagnostics": [],
     }
-    if process.timed_out:
+    if process.cancelled:
+        result["ok"] = False
+        result["diagnostics"].append(_diagnostic(ERROR_WORKFLOW_CANCELLED, "Workflow cancellation requested.", step_id))
+    elif process.timed_out:
         result["ok"] = False
         result["diagnostics"].append(
             _diagnostic(ERROR_PROCESS_TIMEOUT, "Process exceeded its allowed timeout.", step_id)
@@ -1201,6 +1304,15 @@ def _write_manifest_atomic(run_dir: Path, summary: dict[str, Any]) -> None:
     temporary = run_dir / "manifest.json.tmp"
     temporary.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
     temporary.replace(manifest)
+    token = current_cancellation_token()
+    observer = getattr(token, "on_progress", None) if token is not None else None
+    if observer is not None:
+        try:
+            observer(summary)
+        except Exception:
+            # Reporting failure must not turn a completed model mutation into a
+            # failed operation that a caller might replay.
+            pass
 
 
 def _diagnostic(

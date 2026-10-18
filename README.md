@@ -15,6 +15,27 @@ This project is not affiliated with, endorsed by, or sponsored by Ansys.
 | README | [中文说明](README.zh-CN.md) | [English README](README.en.md) |
 | Security | [中文安全提示](SECURITY.zh-CN.md) | [English Security Notes](SECURITY.en.md) |
 | Examples | [工作流示例](examples/README.md) | [Workflow examples](examples/README.md) |
+| Mechanical | [适配、会话与任务](docs/mechanical.zh-CN.md) | [Adapter, sessions and jobs](docs/mechanical.md) |
+| Validation | [分级验收记录](docs/validation.md) | [Validation evidence](docs/validation.md) |
+
+## v0.3 Mechanical and DPF / Mechanical 与 DPF
+
+- Workbench-first and independent Mechanical backends with typed object operations.
+- Persistent sessions, background jobs, cancellation and request observation.
+- Complete installed public-stub inventory with separate runtime and validation status.
+- Local DPF recipes with scoped result fields and CSV/JSON exports.
+- Publication checks for source, distributions and new commit metadata.
+
+- 默认 Workbench 及独立 Mechanical 后端，提供统一对象和值协议。
+- 持久会话、后台任务、取消及未知请求状态查询。
+- 从安装的官方 stubs 建立全量目录，单独记录运行时及验收状态。
+- 本机 DPF 后处理、范围选择及 CSV/JSON 导出。
+- 源码、分发包和新提交元数据发布检查。
+
+Catalog completeness does not imply that every analysis is installed, licensed
+or numerically validated. See the validation report for measured support.
+
+目录完整不等于所有分析均已安装、获得许可或通过数值验证；实际支持以验收报告为准。
 
 ## v0.2 Overview / v0.2 概览
 
@@ -37,7 +58,7 @@ git clone https://github.com/LittleLaXerath/ansys-local-mcp.git
 cd ansys-local-mcp
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
-ansys-local-mcp
+.\.venv\Scripts\ansys-local-mcp.exe
 ```
 
 ## Safety / 安全

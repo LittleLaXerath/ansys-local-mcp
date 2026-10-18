@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -67,6 +68,31 @@ _PATH_OPTIONS = {
 
 class CommandPolicyError(ValueError):
     pass
+
+
+class WindowsBatchCommand(list[str]):
+    """Argv for diagnostics, with cmd.exe's distinct quoting preserved for Popen.
+
+    Passing a batch command as an ordinary argv list asks subprocess to apply
+    MS C-runtime quoting. cmd.exe does not understand the resulting backslash
+    escapes, so the exact /s /c command line must be passed as a string instead.
+    """
+
+    def __init__(self, executable: Path, arguments: list[str]):
+        for value in arguments:
+            if '"' in value or _BATCH_META_RE.search(value):
+                raise CommandPolicyError("Batch arguments contain unsupported shell characters.")
+        if '"' in str(executable) or re.search(r"[%!\r\n\x00]", str(executable)):
+            raise CommandPolicyError("Batch executable contains unsupported shell characters.")
+        # The executable is parsed by cmd; arguments are ultimately passed to
+        # the batch file's child executable and retain Windows argv quoting.
+        inner = '"' + str(executable) + '"'
+        if arguments:
+            inner += " " + subprocess.list2cmdline(arguments)
+        # Keep the existing logical argv layout for diagnostics and callers
+        # which inspect product flags. Only the supervisor uses the wire form.
+        super().__init__(["cmd.exe", "/d", "/s", "/c", str(executable), *arguments])
+        self.windows_commandline = 'cmd.exe /d /v:off /s /c "' + inner + '"'
 
 
 @dataclass(frozen=True)
@@ -221,7 +247,7 @@ def command_argv(command_id: str, args: list[Any] | None = None) -> list[str]:
     spec = specs[command_id]
     argv = [str(part) for part in (args or [])]
     if spec.wrapper == "batch":
-        return ["cmd.exe", "/d", "/s", "/c", str(spec.executable), *argv]
+        return WindowsBatchCommand(spec.executable, argv)
     return [str(spec.executable), *argv]
 
 

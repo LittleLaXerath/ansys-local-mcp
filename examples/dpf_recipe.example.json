@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "server": {"transport": "in_process"},
+  "result_files": [{"path": "results/model.rst"}],
+  "operations": [
+    {"id": "metadata", "op": "metadata"},
+    {"id": "displacement", "op": "result", "name": "displacement", "time_scoping": 1, "requested_location": "Nodal"},
+    {"id": "displacement_norm", "op": "operator", "name": "norm_fc", "inputs": {"fields_container": {"$ref": "displacement"}}},
+    {"id": "sample", "op": "inspect", "source": "displacement_norm", "sample_entities": 3},
+    {"id": "csv", "op": "export", "source": "displacement_norm", "path": "results/displacement_norm.csv", "format": "csv"},
+    {"id": "json", "op": "export", "source": "displacement", "path": "results/displacement.json", "format": "json"}
+  ]
+}

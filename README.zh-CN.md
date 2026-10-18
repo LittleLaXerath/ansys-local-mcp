@@ -18,10 +18,12 @@ python -m venv .venv
 运行控制台入口：
 
 ```powershell
-ansys-local-mcp
+.\.venv\Scripts\ansys-local-mcp.exe
 ```
 
-旧入口 `python .\ansys_mcp_server.py` 继续保留。
+旧入口 `.\.venv\Scripts\python.exe .\ansys_mcp_server.py` 继续保留。
+从未激活虚拟环境的 MCP 客户端启动时，将 `command` 设为该环境中
+`ansys-local-mcp.exe` 的完整路径。示例短命令假定客户端 PATH 已包含此入口。
 
 ## MCP 客户端配置
 
@@ -49,7 +51,7 @@ Schema 只是工作流 JSON 的格式契约：哪些字段必填、允许哪些�
 
 Workflow v1 会在启动任何 Ansys 程序之前拒绝未知字段、空 steps、重复 step ID、路径穿越 ID、非正数超时和格式错误的产品 recipe。
 
-客户端可读取 MCP 资源 `ansys://schema/workflow` 和 `ansys://schema/workbench-recipe`，获取完整字段规则。不能读取资源的客户端可调用 `inspect_runtime(include_schema=True)`。Schema 直接由 Pydantic 模型生成，公开工具仍为 12 个。
+客户端可读取 MCP 资源 `ansys://schema/workflow` 和 `ansys://schema/workbench-recipe`，获取完整字段规则；新增 Mechanical、DPF recipe 也有独立 schema 资源。不能读取资源的客户端可调用 `inspect_runtime(include_schema=True)`。Schema 直接由 Pydantic 模型生成；保留原有 12 个工具，并增加 5 个任务、目录与请求状态工具。
 
 ## MCP 工具
 
@@ -58,6 +60,13 @@ Workflow v1 会在启动任何 Ansys 程序之前拒绝未知字段、空 steps�
 - `inspect_runtime`
 - `validate_workflow`
 - `run_workflow`
+- `start_workflow`
+- `get_workflow_status`
+- `cancel_workflow`
+- `query_capabilities`
+- `get_mechanical_request_status`
+
+Mechanical 会话、值协议与后端说明见[适配文档](docs/mechanical.zh-CN.md)，产品级证据见[验收记录](docs/validation.md)。
 
 保持兼容的旧工具：
 
@@ -182,4 +191,4 @@ python -m unittest discover tests
 python -m compileall ansys_mcp ansys_mcp_server.py
 ```
 
-自动测试不会启动 Workbench、Fluent、CFX、SpaceClaim、Mechanical、MAPDL、System Coupling 或任何求解器。
+默认自动测试不会启动 Workbench、Fluent、CFX、SpaceClaim、Mechanical、MAPDL、System Coupling 或任何求解器。真实产品及 UAC 测试需要显式启用，验收脚本使用隔离的新工程。

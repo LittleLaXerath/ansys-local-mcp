@@ -11,6 +11,8 @@ from .fluent_recipe import run_pyfluent_recipe as run_pyfluent_recipe_impl
 from .config import known_paths, require_allowed_file
 from .runtime import signature_info
 from .schemas import WorkflowModel, WorkbenchRecipe
+from .mechanical_schema import MechanicalRecipe
+from .dpf_schema import DPFRecipe
 from .workflow import inspect_runtime as inspect_runtime_impl
 from .workflow import run_workflow as run_workflow_impl
 from .workflow import validate_workflow as validate_workflow_impl
@@ -29,6 +31,18 @@ def workflow_schema() -> str:
 def workbench_recipe_schema() -> str:
     """Strict Workbench recipe schema, including project and action fields."""
     return json.dumps(WorkbenchRecipe.model_json_schema(), indent=2)
+
+
+@mcp.resource("ansys://schema/mechanical-recipe", mime_type="application/schema+json")
+def mechanical_recipe_schema() -> str:
+    """Versioned Mechanical operations, session references, and typed values."""
+    return json.dumps(MechanicalRecipe.model_json_schema(), indent=2)
+
+
+@mcp.resource("ansys://schema/dpf-recipe", mime_type="application/schema+json")
+def dpf_recipe_schema() -> str:
+    """Versioned local DPF operations, scoping, and artifact exports."""
+    return json.dumps(DPFRecipe.model_json_schema(), indent=2)
 
 
 @mcp.tool()
@@ -223,6 +237,61 @@ def run_workflow(
         variables=variables,
         timeout_seconds=timeout_seconds,
     )
+
+
+@mcp.tool()
+def start_workflow(
+    workflow: dict[str, Any] | None = None,
+    workflow_path: str | None = None,
+    variables: dict[str, Any] | None = None,
+    timeout_seconds: int = 7200,
+) -> dict[str, Any]:
+    """Start an owned background workflow and return its persistent run_id."""
+    from .jobs import start_workflow as start
+    return start(workflow=workflow, workflow_path=workflow_path, variables=variables, timeout_seconds=timeout_seconds)
+
+
+@mcp.tool()
+def get_workflow_status(run_id: str) -> dict[str, Any]:
+    """Reconcile a background workflow against its worker identity and persisted state."""
+    from .jobs import get_workflow_status as status
+    return status(run_id)
+
+
+@mcp.tool()
+def cancel_workflow(run_id: str) -> dict[str, Any]:
+    """Request cancellation of a workflow created by this service; never replay it."""
+    from .jobs import cancel_workflow as cancel
+    return cancel(run_id)
+
+
+@mcp.tool()
+def query_capabilities(
+    product: str = "mechanical",
+    version: str | None = None,
+    component: str | None = None,
+    status: str | None = None,
+    offset: int = 0,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Page the published API catalog and its separate runtime/validation evidence."""
+    from .capabilities import query_capabilities as query
+    return query(product=product, version=version, component=component, status=status, offset=offset, limit=limit)
+
+
+@mcp.tool()
+def get_mechanical_request_status(
+    request_id: str,
+    session_id: str | None = None,
+    worker_id: str | None = None,
+) -> dict[str, Any]:
+    """Observe the same Mechanical request after a timeout; never submit it again."""
+    from .mechanical import mechanical_request_status, mechanical_elevated_request_status
+    if bool(session_id) == bool(worker_id):
+        raise ValueError("Specify exactly one session_id or worker_id from the original response.")
+    if session_id:
+        return mechanical_request_status(session_id, request_id)
+    return mechanical_elevated_request_status(worker_id, request_id)
 
 
 def main() -> None:

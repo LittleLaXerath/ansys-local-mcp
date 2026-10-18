@@ -1,0 +1,23 @@
+{
+  "version": "1",
+  "workdir": "..",
+  "steps": [
+    {
+      "id": "mechanical_model",
+      "type": "mechanical",
+      "recipe": {
+        "version": "1",
+        "backend": "workbench",
+        "mode": "batch",
+        "project": {
+          "save_path": ".ansys_mcp/mechanical-example/model.wbpj"
+        },
+        "operations": [
+          {"op": "inspect", "target": "Model", "store_as": "model"},
+          {"op": "set", "target": "Model.Mesh", "member": "ElementSize", "value": {"$type": "quantity", "value": 2, "unit": "mm"}},
+          {"op": "get", "target": "Model.Mesh", "member": "ElementSize", "store_as": "element_size"}
+        ]
+      }
+    }
+  ]
+}

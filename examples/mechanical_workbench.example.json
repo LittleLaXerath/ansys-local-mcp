@@ -1,0 +1,28 @@
+{
+  "version": "1",
+  "workdir": "..",
+  "steps": [
+    {
+      "id": "mechanical_objects",
+      "type": "mechanical",
+      "recipe": {
+        "backend": "workbench",
+        "mode": "batch",
+        "launch": {"elevation": "auto"},
+        "project": {
+          "template_name": "Static Structural (ANSYS)",
+          "save_path": ".ansys_mcp/mechanical-example/model.wbpj"
+        },
+        "operations": [
+          {"id": "model_members", "op": "inspect", "target": "Model", "limit": 20},
+          {"id": "create_named_selection", "op": "call", "target": "Model", "member": "AddNamedSelection", "store_as": "selection"},
+          {"id": "name_selection", "op": "set", "target": {"$type": "local_ref", "name": "selection"}, "member": "Name", "value": "Example selection"},
+          {"id": "units", "op": "construct", "target": "Quantity", "args": ["2 [mm]"]},
+          {"id": "materials_interface", "op": "engineering_data", "action": "inspect", "limit": 20},
+          {"id": "model_report", "op": "script", "script_path": "examples/scripts/mechanical_setup.py"}
+        ]
+      },
+      "produces": [{"name": "project", "path": ".ansys_mcp/mechanical-example/model.wbpj"}]
+    }
+  ]
+}

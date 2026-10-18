@@ -3,3 +3,13 @@ prune .ansys_mcp
 prune build
 prune dist
 global-exclude __pycache__ *.py[cod]
+global-exclude .env .env.* *.log *.pem *.key *.pfx *.p12
+global-exclude *.wbpj *.wbpz *.mechdb *.mechdat *.scdoc *.scdocx *.step *.stp
+global-exclude *.mechdb.bak *.mechdat.bak *.wbpj.bak *.cas.h5 *.dat.h5
+global-exclude *.rst *.rth *.d3plot *.binout
+global-exclude *.ad *.adres *.agdb *.db *.cdb *.mode *.msh *.cas *.dat *.def *.gtm *.res *.out
+exclude mcp_client_config.json private_fingerprints.json
+include README*.md SECURITY*.md CHANGELOG.md LICENSE
+recursive-include docs *.md
+recursive-include examples *.json *.py *.wbjn *.jou *.ccl
+recursive-include tools *.py

@@ -24,10 +24,13 @@ python -m venv .venv
 Run the console entry point:
 
 ```powershell
-ansys-local-mcp
+.\.venv\Scripts\ansys-local-mcp.exe
 ```
 
-The legacy `python .\ansys_mcp_server.py` entry point remains available.
+The legacy `.\.venv\Scripts\python.exe .\ansys_mcp_server.py` entry point remains available.
+For an MCP client launched outside the activated environment, set its `command`
+to the full path of that environment's `ansys-local-mcp.exe`. The short command
+in the example assumes the executable is already on the client's PATH.
 
 ## Client Configuration
 
@@ -68,7 +71,9 @@ Ansys application starts.
 Read MCP resources `ansys://schema/workflow` and
 `ansys://schema/workbench-recipe` for complete field rules, or call
 `inspect_runtime(include_schema=True)` when resources are unavailable.
-These schemas come directly from Pydantic. The tool count remains 12.
+These schemas come directly from Pydantic. Mechanical and DPF recipes also have
+dedicated schema resources. All original 12 tools remain, with five additional
+job, catalog and request-observation tools.
 
 ## MCP Tools
 
@@ -77,6 +82,14 @@ Stable general tools:
 - `inspect_runtime`
 - `validate_workflow`
 - `run_workflow`
+- `start_workflow`
+- `get_workflow_status`
+- `cancel_workflow`
+- `query_capabilities`
+- `get_mechanical_request_status`
+
+See [Mechanical sessions and recipes](docs/mechanical.md) and
+[validation evidence](docs/validation.md) for backend coverage and product tests.
 
 Compatibility tools retained unchanged:
 
@@ -238,5 +251,6 @@ python -m unittest discover tests
 python -m compileall ansys_mcp ansys_mcp_server.py
 ```
 
-Automated tests do not launch Workbench, Fluent, CFX, SpaceClaim, Mechanical,
-MAPDL, System Coupling, or a solver.
+Default automated tests do not launch Workbench, Fluent, CFX, SpaceClaim, Mechanical,
+MAPDL, System Coupling, or a solver. Product/UAC tests require explicit opt-in;
+acceptance runners use isolated new projects.

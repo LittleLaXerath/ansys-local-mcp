@@ -4,6 +4,9 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
+from .mechanical_schema import MechanicalRecipe
+from .dpf_schema import DPFRecipe
+
 
 ID_PATTERN = r"^[A-Za-z][A-Za-z0-9_-]{0,63}$"
 METHOD_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
@@ -393,6 +396,16 @@ class FileStep(BaseWorkflowStep):
         return self
 
 
+class MechanicalStep(BaseWorkflowStep):
+    type: Literal["mechanical"]
+    recipe: MechanicalRecipe
+
+
+class DPFStep(BaseWorkflowStep):
+    type: Literal["dpf"]
+    recipe: DPFRecipe
+
+
 class AssertStep(BaseWorkflowStep):
     type: Literal["assert"]
     path: str
@@ -405,7 +418,7 @@ class CollectStep(BaseWorkflowStep):
 
 
 WorkflowStep = Annotated[
-    Union[CommandStep, PythonScriptStep, PyFluentStep, WorkbenchStep, FileStep, AssertStep, CollectStep],
+    Union[CommandStep, PythonScriptStep, PyFluentStep, WorkbenchStep, MechanicalStep, DPFStep, FileStep, AssertStep, CollectStep],
     Field(discriminator="type"),
 ]
 WORKFLOW_STEP_ADAPTER = TypeAdapter(WorkflowStep)

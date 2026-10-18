@@ -17,8 +17,20 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install package
-        run: python -m pip install -e .
+        run: python -m pip install -e ".[dev]"
       - name: Run unit tests
         run: python -m unittest discover tests
       - name: Compile package
         run: python -m compileall ansys_mcp ansys_mcp_server.py
+      - name: Check dependency consistency
+        run: python -m pip check
+      - name: Check publication tree
+        run: python -m ansys_mcp.publication --root .
+      - name: Build distributions
+        run: python -m build
+      - name: Check distribution contents
+        shell: pwsh
+        run: |
+          $archiveArgs = @()
+          Get-ChildItem -LiteralPath dist -File | ForEach-Object { $archiveArgs += @('--artifact', $_.FullName) }
+          python -m ansys_mcp.publication --root . @archiveArgs

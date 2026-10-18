@@ -1,3 +1,4 @@
+# Python Script, API Version = V261
 # Run inside a fresh SpaceClaim document, through either supplied workflow.
 import json
 import math
@@ -12,7 +13,7 @@ with open(os.path.join(output_dir, "parameters.json"), "r") as stream:
 dimensions = [float(parameters[key]) for key in ("length_mm", "width_mm", "height_mm")]
 if any(value <= 0 or math.isnan(value) or math.isinf(value) for value in dimensions):
     raise ValueError("Channel dimensions must be finite positive millimetres.")
-native_path = os.path.join(output_dir, "channel.scdoc")
+native_path = os.path.join(output_dir, "channel.scdocx")
 step_path = os.path.join(output_dir, "channel.step")
 measurement_path = os.path.join(output_dir, "measurements.json")
 if any(os.path.exists(path) for path in (native_path, step_path, measurement_path)):
@@ -26,7 +27,7 @@ created = BlockBody.Create(Point.Create(0, 0, 0), Point.Create(length, width, he
 if len(created.CreatedBodies) != 1:
     raise RuntimeError("Expected exactly one channel fluid body.")
 body = created.CreatedBodies[0]
-body.SetName("fluid")
+body.Name = "fluid"
 selection = Selection.Create(body)
 selection.CreateAGroup("fluid")
 

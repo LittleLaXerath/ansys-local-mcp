@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.0
+
+- Adds versioned Mechanical/DPF workflow steps while retaining Workflow v1 and
+  the original public tools.
+- Adds Workbench-first and independent Mechanical backends, typed values,
+  owned sessions, request observation, and explicit local elevation workers.
+- Adds durable background jobs, progress, process-identity reconciliation and
+  cancellation without replaying uncertain product mutations.
+- Inventories the installed official Mechanical stubs with source accounting;
+  public declarations and product validation evidence remain separate.
+- Adds scoped local DPF operations and CSV/JSON exports in supervised workers.
+- Fixes Windows batch quoting and expands real-process lifecycle regressions.
+- Includes PyAnsys dependencies in the standard installation and publication
+  checks for tracked files, staged content, distributions and commit identity.
+- Records opt-in product validation separately from unit and simulated tests.
+
+- 新增 Mechanical/DPF 工作流、双后端、统一值协议及持久任务管理。
+- 分离公开 API 目录、运行时可达和真实产品数值验证等级。
+- 增加发布脱敏检查，原始工程、配置及运行日志留在本地运行目录。
+
 ## 0.2.1
 
 - Fixes SpaceClaim slash options and distinguishes command input/output paths.
