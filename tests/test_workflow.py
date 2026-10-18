@@ -6,7 +6,9 @@ import os
 import shutil
 import types
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 PROJECT = Path(__file__).resolve().parents[1]
 os.environ["ANSYS_MCP_ALLOWED_ROOTS"] = str(PROJECT)
@@ -16,7 +18,7 @@ import sys
 sys.path.insert(0, str(PROJECT))
 os.chdir(PROJECT)
 
-from ansys_mcp.command_registry import command_argv, supported_command_ids
+from ansys_mcp.command_registry import command_argv, command_specs, supported_command_ids
 from ansys_mcp.fluent_recipe import legacy_pyfluent_workflow, legacy_python_script_workflow
 from ansys_mcp.pyfluent_recipe_runner import _resolve_any, _run_operation
 from ansys_mcp.workflow import inspect_runtime, run_workflow, validate_workflow
@@ -77,6 +79,49 @@ class WorkflowTests(unittest.TestCase):
         )
         self.assertFalse(result["ok"])
         self.assertEqual(result["diagnostics"][0]["code"], "COMMAND_POLICY_ERROR")
+
+    def test_dangerous_arguments_rejected_before_missing_installation(self) -> None:
+        absent = self.scratch / "missing-install" / "python.exe"
+        self.assertFalse(absent.is_file())
+        specs = {name: replace(spec, executable=absent) for name, spec in command_specs().items()}
+        steps = [
+            {"type": "command", "command_id": "ansys_python", "args": ["-c", "print(1) && echo bad"]},
+            {"type": "python_script", "script_path": "-c", "arguments": ["print(1) && echo bad"]},
+            {"type": "command", "command_id": "runwb2_batch", "args": ["-R", "journal.wbjn&echo bad"]},
+        ]
+        with patch("ansys_mcp.workflow.command_specs", return_value=specs), \
+                patch("ansys_mcp.command_registry.command_specs", return_value=specs), \
+                patch("ansys_mcp.workflow.ansys_python_executable", return_value=absent), \
+                patch("ansys_mcp.workflow.run_process") as launch:
+            for mode in ("schema", "runtime"):
+                for step in steps:
+                    with self.subTest(mode=mode, step=step):
+                        result = validate_workflow({"version": "1", "workdir": str(PROJECT), "steps": [{"id": "bad", **step}]}, validation_mode=mode)
+                        self.assertFalse(result["ok"], result)
+                        self.assertEqual(result["diagnostics"][0]["code"], "COMMAND_POLICY_ERROR")
+            launch.assert_not_called()
+
+    def test_valid_script_keeps_schema_and_runtime_availability_semantics(self) -> None:
+        absent = self.scratch / "missing-install" / "python.exe"
+        self.assertFalse(absent.is_file())
+        specs = {name: replace(spec, executable=absent) for name, spec in command_specs().items()}
+        script = str(PROJECT / "ansys_mcp_server.py")
+        steps = [
+            {"type": "command", "command_id": "ansys_python", "args": [script]},
+            {"type": "python_script", "script_path": script},
+        ]
+        with patch("ansys_mcp.workflow.command_specs", return_value=specs), \
+                patch("ansys_mcp.command_registry.command_specs", return_value=specs), \
+                patch("ansys_mcp.workflow.ansys_python_executable", return_value=absent), \
+                patch("ansys_mcp.workflow.run_process") as launch:
+            for step in steps:
+                with self.subTest(step=step):
+                    workflow = {"version": "1", "workdir": str(PROJECT), "steps": [{"id": "valid", **step}]}
+                    self.assertTrue(validate_workflow(workflow, validation_mode="schema")["ok"])
+                    runtime = validate_workflow(workflow, validation_mode="runtime")
+                    self.assertFalse(runtime["ok"], runtime)
+                    self.assertEqual(runtime["diagnostics"][0]["code"], "EXECUTABLE_MISSING")
+            launch.assert_not_called()
 
     def test_validate_does_not_mutate(self) -> None:
         target = self.scratch / "validate_only.txt"

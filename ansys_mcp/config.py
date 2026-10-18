@@ -136,7 +136,7 @@ def allowed_roots_info(environ: Mapping[str, str] | None = None) -> AllowedRoots
     configured = env.get("ANSYS_MCP_ALLOWED_ROOTS")
     if not configured:
         return AllowedRootsResolution(
-            roots=(STARTUP_CWD,),
+            roots=(STARTUP_CWD.resolve(strict=False),),
             source="startup_cwd",
             warnings=("ANSYS_MCP_ALLOWED_ROOTS is unset; only the server startup directory is allowed.",),
         )
@@ -217,7 +217,7 @@ def default_workdir() -> Path:
     info = allowed_roots_info()
     if info.valid:
         return info.roots[0]
-    return STARTUP_CWD
+    return STARTUP_CWD.resolve(strict=False)
 
 
 def known_paths(root: Path | None = None) -> dict[str, Path]:

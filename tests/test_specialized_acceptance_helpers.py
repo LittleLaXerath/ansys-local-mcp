@@ -66,7 +66,10 @@ class SpecializedAcceptanceGateTests(unittest.TestCase):
         report = {"status": "solved", "result_file": str(self.table.parent / "old_files" / "d3plot")}
         with patch.dict(os.environ, {"ANSYS_MCP_ALLOWED_ROOTS": str(self.table.parent)}):
             resolved = resolve_saved_result_path(report, project)
-        self.assertEqual(resolved["result_file"], str(retained))
+        # Windows temporary directories may use an 8.3 alias while the path
+        # boundary returns the canonical long name for the same native file.
+        self.assertEqual(resolved["result_file"], str(retained.resolve()))
+        self.assertTrue(Path(resolved["result_file"]).samefile(retained))
         self.assertEqual(resolved["result_file_before_project_save"], report["result_file"])
         self.assertNotIn("result_path_relocated_after_save", report)
 

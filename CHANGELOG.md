@@ -12,6 +12,8 @@
   public declarations and product validation evidence remain separate.
 - Adds scoped local DPF operations and CSV/JSON exports in supervised workers.
 - Fixes Windows batch quoting and expands real-process lifecycle regressions.
+- Normalizes Windows path aliases for allowed roots and session registries;
+  rejects invalid command arguments even when Ansys is not installed.
 - Includes PyAnsys dependencies in the standard installation and publication
   checks for tracked files, staged content, distributions and commit identity.
 - Records opt-in product validation separately from unit and simulated tests.
@@ -19,6 +21,7 @@
 - 新增 Mechanical/DPF 工作流、双后端、统一值协议及持久任务管理。
 - 分离公开 API 目录、运行时可达和真实产品数值验证等级。
 - 增加发布脱敏检查，原始工程、配置及运行日志留在本地运行目录。
+- 统一 Windows 长短路径；未安装产品时仍严格校验动作参数。
 
 ## 0.2.1
 

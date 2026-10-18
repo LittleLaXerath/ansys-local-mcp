@@ -469,6 +469,9 @@ _RECORD_ID = re.compile(r"^[a-f0-9]{32}$")
 def _record_path(kind: str, record_id: str, workdir: Path) -> Path:
     if kind not in {"sessions", "workers"} or not _RECORD_ID.fullmatch(record_id):
         raise MechanicalError("MECHANICAL_REGISTRY_ID_INVALID", "Invalid Mechanical registry id.")
+    # Windows temp directories can arrive through an 8.3 alias while allowed
+    # roots are canonical long paths. Select the same registry root for both.
+    workdir = require_allowed_path(workdir, expect_file=False)
     candidates = [root for root in allowed_roots() if workdir == root or workdir.is_relative_to(root)]
     registry_root = max(candidates, key=lambda root: len(root.parts)) if candidates else workdir
     return require_allowed_path(registry_root / ".ansys_mcp" / "mechanical-registry" / kind / (record_id + ".json"))

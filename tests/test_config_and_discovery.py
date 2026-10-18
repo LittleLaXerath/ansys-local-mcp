@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
+import ctypes
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,7 +13,8 @@ PROJECT = Path(__file__).resolve().parents[1]
 os.environ["ANSYS_MCP_ALLOWED_ROOTS"] = str(PROJECT)
 os.chdir(PROJECT)
 
-from ansys_mcp.config import STARTUP_CWD, allowed_roots_info, discover_installation
+from ansys_mcp import config
+from ansys_mcp.config import STARTUP_CWD, allowed_roots_info, default_workdir, discover_installation, require_allowed_path
 from ansys_mcp.workflow import inspect_runtime, validate_workflow
 
 
@@ -71,6 +74,45 @@ class AllowedRootsTests(unittest.TestCase):
         self.assertEqual(info.roots, (STARTUP_CWD,))
         self.assertEqual(info.source, "startup_cwd")
         self.assertTrue(info.warnings)
+
+    def test_implicit_startup_alias_is_canonicalized_without_allowing_siblings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            canonical = Path(directory).resolve()
+            alias = canonical.parent / "SYNTHET~1"
+            original_resolve = Path.resolve
+            def canonicalize(path, *args, **kwargs):
+                try:
+                    path = canonical / path.relative_to(alias)
+                except ValueError:
+                    pass
+                return original_resolve(path, *args, **kwargs)
+            with patch.object(Path, "resolve", autospec=True, side_effect=canonicalize), \
+                    patch.object(config, "STARTUP_CWD", alias), patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("ANSYS_MCP_ALLOWED_ROOTS", None)
+                self.assertEqual(allowed_roots_info({}).roots, (canonical,))
+                self.assertEqual(default_workdir(), canonical)
+                self.assertEqual(require_allowed_path(alias / "nested" / "future.txt"), canonical / "nested" / "future.txt")
+                with self.assertRaises(ValueError):
+                    require_allowed_path(canonical.parent / (canonical.name + "-outside") / "file.txt")
+
+    @unittest.skipUnless(os.name == "nt", "Windows 8.3 path aliases")
+    def test_real_windows_short_startup_root_accepts_the_same_long_directory_only(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="allowed roots long name ") as directory:
+            canonical = Path(directory).resolve()
+            api = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+            api.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+            api.restype = ctypes.c_uint32
+            needed = api(str(canonical), None, 0)
+            self.assertGreater(needed, 0)
+            buffer = ctypes.create_unicode_buffer(needed + 1)
+            self.assertGreater(api(str(canonical), buffer, len(buffer)), 0)
+            alias = Path(buffer.value)
+            with patch.object(config, "STARTUP_CWD", alias), patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("ANSYS_MCP_ALLOWED_ROOTS", None)
+                self.assertEqual(allowed_roots_info({}).roots, (canonical,))
+                self.assertEqual(require_allowed_path(canonical / "nested" / "future.txt"), canonical / "nested" / "future.txt")
+                with self.assertRaises(ValueError):
+                    require_allowed_path(canonical.parent / (canonical.name + "-outside") / "file.txt")
 
     def test_any_invalid_configured_root_fails_closed(self) -> None:
         configured = str(PROJECT) + ";" + str(PROJECT / "does-not-exist")

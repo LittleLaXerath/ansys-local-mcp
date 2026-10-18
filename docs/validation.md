@@ -124,8 +124,9 @@ reported as unknown; the stub inventory is never used to infer availability.
 process tests. Product acceptance is opt-in and must run against new isolated
 projects. A test skip is recorded as a skip, never as a successful solve.
 
-The local default suite considered 212 tests: 210 passed and two explicit
-opt-in tests were skipped. The product and numerical evidence above comes from
+The full local suite ran with genuine Windows 8.3 temporary-directory aliases:
+217 tests were considered, 215 passed and two explicit opt-in tests were skipped.
+The product and numerical evidence above comes from
 the separate real-product runs, not from those skips.
 
 Before publishing, run the publication checker on the full staged tree and the

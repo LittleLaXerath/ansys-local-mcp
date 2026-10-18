@@ -521,8 +521,6 @@ def _validate_command_step(
     if step.command_id not in specs:
         raise WorkflowProblem(ERROR_VALIDATION, f"Unknown command_id: {step.command_id}", step_id)
     spec = specs[step.command_id]
-    if validation_mode == "runtime" and not spec.executable.is_file():
-        raise WorkflowProblem(ERROR_EXECUTABLE_MISSING, f"Executable not found: {spec.executable}", step_id)
     if step.detach and not spec.supports_detach:
         raise WorkflowProblem(ERROR_COMMAND_POLICY, f"{step.command_id} does not support detach.", step_id)
     try:
@@ -530,6 +528,10 @@ def _validate_command_step(
     except (CommandPolicyError, ValueError, ConfigurationError) as exc:
         code = ERROR_CONFIG if isinstance(exc, ConfigurationError) else ERROR_COMMAND_POLICY
         raise WorkflowProblem(code, str(exc), step_id) from exc
+    # Invalid actions must be rejected even on hosts with no Ansys installation.
+    # Availability is a runtime check, after the installation-independent policy.
+    if validation_mode == "runtime" and not spec.executable.is_file():
+        raise WorkflowProblem(ERROR_EXECUTABLE_MISSING, f"Executable not found: {spec.executable}", step_id)
 
 
 def _validate_python_script_step(
@@ -539,8 +541,6 @@ def _validate_python_script_step(
     validation_mode: Literal["runtime", "schema"],
     checks: PathChecks,
 ) -> None:
-    if validation_mode == "runtime" and not ansys_python_executable().is_file():
-        raise WorkflowProblem(ERROR_EXECUTABLE_MISSING, f"Ansys Python not found: {ansys_python_executable()}", step_id)
     try:
         validate_command_args(
             "ansys_python",
@@ -551,6 +551,8 @@ def _validate_python_script_step(
         )
     except (CommandPolicyError, ValueError, ConfigurationError) as exc:
         raise WorkflowProblem(ERROR_COMMAND_POLICY, str(exc), step_id) from exc
+    if validation_mode == "runtime" and not ansys_python_executable().is_file():
+        raise WorkflowProblem(ERROR_EXECUTABLE_MISSING, f"Ansys Python not found: {ansys_python_executable()}", step_id)
 
 
 def _validate_pyfluent_step(

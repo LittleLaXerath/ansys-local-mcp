@@ -76,7 +76,7 @@ class MechanicalRecoveryTests(unittest.TestCase):
         result = host.run_mechanical_recipe({"session": {"action": "reuse", "id": self.session_id}, "operations": [{"op": "get", "member": "Name"}]}, self.workdir, self.workdir / "run", 1)
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["outputs"]["session"]["id"], self.session_id)
-        self.attach_mock.assert_called_once_with(self.directory)
+        self.attach_mock.assert_called_once_with(self.directory.resolve())
         observed = host.mechanical_request_status(self.session_id, "original-request")
         self.assertEqual(observed["outputs"]["request_id"], "original-request")
         self.launch_mock.assert_not_called()
@@ -100,6 +100,31 @@ class MechanicalRecoveryTests(unittest.TestCase):
         self.assertEqual(result["request_id"], "original-outer")
         self.assertEqual(result["status"], "running")
         self.launch_mock.assert_not_called()
+
+    def test_workdir_alias_selects_the_same_root_registry_and_restores_canonical_worker(self):
+        canonical = self.root.resolve()
+        alias = canonical.parent / "SYNTHET~1"
+        original_resolve = Path.resolve
+        def canonicalize(path, *args, **kwargs):
+            try:
+                path = canonical / path.relative_to(alias)
+            except ValueError:
+                pass
+            return original_resolve(path, *args, **kwargs)
+        worker_id = "c" * 32
+        with patch.object(Path, "resolve", autospec=True, side_effect=canonicalize):
+            workdir = alias / self.workdir.name
+            host._write_record("workers", worker_id, {
+                "id": worker_id, "state_dir": str(workdir / "worker"), "workdir": str(workdir),
+                "worker": self.proxy.worker, "closed": False,
+            }, workdir)
+            expected = canonical / ".ansys_mcp" / "mechanical-registry" / "workers" / (worker_id + ".json")
+            self.assertEqual(host._record_path("workers", worker_id, workdir), expected)
+            self.assertTrue(expected.is_file())
+            restored = host._restore_worker(worker_id)
+            self.assertIs(restored, self.proxy)
+            self.attach_mock.assert_called_once_with(self.directory.resolve())
+            self.launch_mock.assert_not_called()
 
     def test_acknowledged_actor_failure_keeps_observation_handles(self):
         class HandlerFailure(RuntimeError):

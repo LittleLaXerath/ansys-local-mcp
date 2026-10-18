@@ -175,7 +175,7 @@ class DPFAdapterTests(unittest.TestCase):
              patch("ansys_mcp.dpf.run_process", return_value=process) as run:
             os.environ.pop("ANSYS_MCP_ALLOWED_ROOTS", None)
             run_dpf_recipe({"operations": [{"id": "readers", "op": "discover"}]}, workdir, workdir / "run", 1)
-            self.assertEqual(run.call_args.kwargs["env"]["ANSYS_MCP_ALLOWED_ROOTS"], str(self.root))
+            self.assertEqual(run.call_args.kwargs["env"]["ANSYS_MCP_ALLOWED_ROOTS"], str(self.root.resolve()))
 
     def test_autodyn_support_is_not_inferred_from_ls_dyna_readers(self):
         rows = {row["component"]: row for row in format_capabilities(["lsdyna::d3plot::S", "mapdl::rst::U"])}
