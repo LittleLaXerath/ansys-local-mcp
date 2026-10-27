@@ -16,7 +16,9 @@ This project is not affiliated with, endorsed by, or sponsored by Ansys.
 | Security | [中文安全提示](SECURITY.zh-CN.md) | [English Security Notes](SECURITY.en.md) |
 | Examples | [工作流示例](examples/README.md) | [Workflow examples](examples/README.md) |
 | Mechanical | [适配、会话与任务](docs/mechanical.zh-CN.md) | [Adapter, sessions and jobs](docs/mechanical.md) |
-| Validation | [分级验收记录](docs/validation.md) | [Validation evidence](docs/validation.md) |
+| Validating | [分级验收记录](docs/validation.md) | [Validation evidence](docs/validation.md) |
+| Testing | [测试分组与基线](docs/testing.md) | [Test groups and baseline](docs/testing.md) |
+| Known issues | [已知问题](docs/known-issues.md) | [Known issues](docs/known-issues.md) |
 
 ## v0.3 Mechanical and DPF / Mechanical 与 DPF
 

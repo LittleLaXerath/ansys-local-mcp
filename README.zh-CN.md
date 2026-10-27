@@ -90,6 +90,8 @@ Step 类型：
 - `python_script`：使用 Ansys Python 运行允许目录内的 `.py`。
 - `pyfluent`：执行严格定义的通用 PyFluent 操作。
 - `workbench`：编译并执行结构化 Workbench recipe。
+- `mechanical`：执行版本化 Mechanical recipe（对象、会话与工程操作）。
+- `dpf`：执行版本化本地 DPF recipe 并按范围导出结果。
 - `file`：检查、读取、写入或复制文件。
 - `assert`：断言路径是否存在。
 - `collect`：收集必需或可选产物。

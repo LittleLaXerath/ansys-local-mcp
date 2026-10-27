@@ -123,11 +123,18 @@ reported as unknown; the stub inventory is never used to infer availability.
 `python -m unittest discover tests` runs contract, simulated-product and ordinary
 process tests. Product acceptance is opt-in and must run against new isolated
 projects. A test skip is recorded as a skip, never as a successful solve.
+Test groups, opt-in variables and the measured baseline are recorded in
+[testing.md](testing.md); open defects and pending investigations are in
+[known-issues.md](known-issues.md).
 
-The full local suite ran with genuine Windows 8.3 temporary-directory aliases:
-217 tests were considered, 215 passed and two explicit opt-in tests were skipped.
-The product and numerical evidence above comes from
-the separate real-product runs, not from those skips.
+Measured 2026-10-27 on Windows 11 with Python 3.11.9: 224 tests were considered,
+208 passed, three failed, 11 errored and two explicit opt-in tests were skipped.
+All 14 failing/erroring cases are durable-worker/elevation lifecycle tests that
+cannot create a WMI process from a medium-integrity, deny-only-administrators
+token; they fail closed before any worker starts. The run also confirmed that
+the shared pywin32 cache defect is fixed (no `gen_py` errors remained). The
+product and numerical evidence above comes from separate real-product runs, not
+from these tests.
 
 Before publishing, run the publication checker on the full staged tree and the
 actual wheel/sdist contents. Only sanitized validation summaries are published.
