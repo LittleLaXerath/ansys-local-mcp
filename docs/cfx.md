@@ -95,13 +95,38 @@ CFX writes monitor *values* to `.trn` files, not to the solver log, so
 byte offset and keeps a partially written last line for the next read, so a
 caller can poll a growing log without duplicating samples.
 
+Result paths are read only from the final result-output footer, including CFX's
+hyphen-wrapped long paths. Restart/initial-value input paths are not outputs.
+Residual and Courant rows are scoped to their own tables, so parallel memory
+statistics cannot contaminate the reported convergence state.
+
+## Recorded product acceptance (2026-10-28)
+
+A copied, retained Re100 case completed `pre -> solve -> post` through a fresh
+stdio MCP server: 5.00 to 5.02 s, four 0.005 s steps, double precision, four
+local partitions. The workflow took about 52 s; all three supervised Jobs
+finished with zero remaining processes. Native CFD-Post opened the new result
+and exported final-time metrics. The source project/input/result hashes stayed
+unchanged.
+
+The relative mass imbalance was 9.90e-8; final x/y force differences from the
+retained result at the same time were 0.01162% and 0.01730%. The minimum finite
+volume was positive and final equation RMS values were below 1e-5.
+Original files, command lines, manifests and reports remain in the private
+acceptance directory, not in this repository.
+
+The first attempt exposed two parser defects (a restart path selected instead
+of the wrapped output footer, and a memory-table row misread as a residual).
+Its failed MCP record was retained. A new isolated run passed after fixes and
+product-free regression tests; the failed record was not relabeled as success.
+
 ## Current limits
 
 - No CCL parser: the `.pre`/`.ccl`/`.cse` files are trusted inputs whose meaning
   is not validated here.
-- Product acceptance for a real small CFX case and the Re100 regression is
-  explicit opt-in and has not been run for this step yet. Interface and
-  completion tests are product-free.
+- The recorded short restart verifies this product chain and instantaneous
+  checks only. A complete Re100 frequency/mean-force regression remains pending;
+  no grid/time-step independence or historical-stall root-cause fix is claimed.
 - The Workbench CCL channel remains available and unchanged for projects,
   geometry and meshing.
 

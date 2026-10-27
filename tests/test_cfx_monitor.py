@@ -69,6 +69,39 @@ TAIL = """\
 
 
 class CFXMonitorTests(unittest.TestCase):
+    def test_result_footer_ignores_restart_input_and_joins_wrapped_path(self):
+        text = r" D:\work\restart_001.res" + "\n" + "\n".join([
+            " | The results from this run of the ANSYS CFX Solver have been |",
+            " | written to |",
+            r" | D:\work\case-20261028- |",
+            r" | -unique\smoke_001.res |",
+            " +------------------+",
+        ]) + "\n"
+        state = parse_cfx_log(text)
+        self.assertEqual(state["result_path"], r"D:\work\case-20261028-unique\smoke_001.res")
+
+    def test_wrapped_result_footer_preserves_spaces_and_incremental_state(self):
+        first = "\n".join([
+            " | The results from this run of the ANSYS CFX Solver have been |",
+            " | written to |", r" | D:\work\a directory |",
+        ]) + "\n"
+        state = parse_cfx_log(first)
+        self.assertIsNone(state["result_path"])
+        parse_cfx_log(r" | with spaces\result.res |" + "\n", state)
+        self.assertEqual(state["result_path"], r"D:\work\a directory with spaces\result.res")
+
+    def test_parallel_memory_and_other_numeric_tables_are_not_residuals(self):
+        text = LOG_HEADER + STEP + "\n".join([
+            " | Host Memory Information (Mbytes): Solver |",
+            " | Host | Nproc | System | Peak | % |",
+            " | WORKSTATION | 4 | 64992.15 | 1256.38 | 1.93 |",
+            " | 1.0 | 2.0 | 3.0 |",
+        ]) + "\n"
+        state = parse_cfx_log(text)
+        self.assertEqual(set(state["samples"][-1]["equations"]), {"U-Mom", "V-Mom", "P-Mass"})
+        self.assertTrue(summarize(state)["converged"])
+        self.assertEqual(state["samples"][-1]["courant"]["max"], 12.9)
+
     def test_parse_time_steps_equations_and_metadata(self) -> None:
         state = parse_cfx_log(LOG_HEADER + STEP + STEP2 + TAIL)
         self.assertEqual([sample["time_step"] for sample in state["samples"]], [1, 2])

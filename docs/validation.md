@@ -28,6 +28,7 @@ or new solver runs are claimed. See [Operations](operations.md).
 
 | Component | Observed evidence | Level |
 | --- | --- | --- |
+| CFX MCP short restart | Copied Re100 pre/solve/post through fresh stdio MCP; 5.00–5.02 s, four steps/four partitions; native CFD-Post readback, mass imbalance 9.90e-8, x/y force differences 0.01162%/0.01730%; original input/project/result hashes unchanged | Short workflow/result; full shedding regression pending |
 | Windows process supervision | Real command quoting, cancellation, owned-child cleanup and client-independent jobs | Runtime |
 | Mechanical direct backend | Empty model inspection, save, reopen, generation update and close through an authenticated administrator worker | Object lifecycle |
 | DPF local worker | Real server discovery, official bundled result metadata, nodal displacement and CSV/JSON exports | Result access |

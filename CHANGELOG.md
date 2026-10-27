@@ -19,8 +19,11 @@
   completion, timeout, cancellation and stale-log misjudgement, plus
   `tools.diagnose_cfx_launch` for the synthetic matrix and the authorized
   official-vs-MCP comparison template.
-- Product acceptance for a small CFX case and the Re100 regression remains
-  pending and explicitly opt-in.
+- Fixes result-footer extraction for hyphen-wrapped long paths and prevents
+  host-memory tables from being interpreted as residual equations.
+- Records an opt-in CFX short restart through the real pre/solve/post MCP
+  chain with native result readback. Full Re100 shedding regression remains
+  pending; the initial failed parser record is retained separately.
 
 ## 0.3.1
 

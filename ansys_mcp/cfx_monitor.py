@@ -39,7 +39,8 @@ def _number(text: str) -> float | None:
 
 def empty_state() -> dict[str, Any]:
     return {"samples": [], "residual_target": None, "residual_type": None, "total_time_s": None,
-            "finished": False, "result_path": None, "monitor_points": [], "restarts": 0, "orphan_rows": 0}
+            "finished": False, "result_path": None, "monitor_points": [], "restarts": 0, "orphan_rows": 0,
+            "table_section": None, "result_section": False, "result_path_buffer": ""}
 
 
 def parse_cfx_log(text: str, state: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -47,6 +48,35 @@ def parse_cfx_log(text: str, state: dict[str, Any] | None = None) -> dict[str, A
     current = state if state is not None else empty_state()
     for raw in text.splitlines():
         line = raw.rstrip("\r")
+        body = line.strip()
+        if body.startswith("|") and body.endswith("|"):
+            body = body[1:-1].strip()
+        if "The results from this run of the ANSYS CFX Solver have been" in body:
+            current.update(result_section=True, result_path_buffer="", result_path=None, table_section=None)
+            continue
+        if current.get("result_section"):
+            if re.fullmatch(r"\+-+\+", body):
+                current.update(result_section=False, result_path_buffer="")
+            elif body and not body.startswith("written to"):
+                pending = current.get("result_path_buffer", "")
+                if pending:
+                    # CFX's verbatim wrapper appends one hyphen when splitting
+                    # a word. A real leading hyphen on the next line is kept.
+                    pending = pending[:-1] + body if pending.endswith("-") else pending + " " + body
+                else:
+                    pending = body
+                current["result_path_buffer"] = pending
+                match = _RESULT_PATH.fullmatch(pending)
+                if match:
+                    current.update(result_path=match.group(1), result_section=False, result_path_buffer="")
+            continue
+        if "Equation" in body and "RMS Res" in body and "Max Res" in body:
+            current["table_section"] = "equations"
+        elif "RMS Courant Number" in body and "Max Courant Number" in body:
+            current["table_section"] = "courant"
+        elif not body or (line.lstrip().startswith("|") and re.search(r"[A-Za-z]", body)
+                          and not _EQUATION.match(line) and not _COURANT.match(line)):
+            current["table_section"] = None
         match = _TIME_STEP.match(line)
         if match:
             step, simulation_time, cpu = int(match.group(1)), _number(match.group(2)), _number(match.group(3))
@@ -61,12 +91,13 @@ def parse_cfx_log(text: str, state: dict[str, Any] | None = None) -> dict[str, A
             continue
         match = _LOOP.match(line)
         if match:
+            current["table_section"] = "equations"
             sample = current["samples"][-1] if current["samples"] else None
             if sample is not None:
                 sample["iteration"] = int(match.group(1))
             continue
         match = _EQUATION.match(line)
-        if match:
+        if match and current.get("table_section") == "equations":
             sample = current["samples"][-1] if current["samples"] else None
             rate, rms, maximum = (_number(match.group(2)), _number(match.group(3)), _number(match.group(4)))
             if sample is None or rms is None or maximum is None or rate is None:
@@ -75,7 +106,7 @@ def parse_cfx_log(text: str, state: dict[str, Any] | None = None) -> dict[str, A
             sample["equations"][match.group(1)] = {"rate": rate, "rms": rms, "max": maximum}
             continue
         match = _COURANT.match(line)
-        if match:
+        if match and current.get("table_section") == "courant":
             sample = current["samples"][-1] if current["samples"] else None
             timestep, mean, maximum = (_number(match.group(1)), _number(match.group(2)), _number(match.group(3)))
             if sample is not None and timestep is not None and mean is not None and maximum is not None:
@@ -96,10 +127,6 @@ def parse_cfx_log(text: str, state: dict[str, Any] | None = None) -> dict[str, A
         match = _MONITOR_POINT.match(line)
         if match and match.group(1) not in current["monitor_points"]:
             current["monitor_points"].append(match.group(1))
-            continue
-        match = _RESULT_PATH.match(line)
-        if match:
-            current["result_path"] = match.group(1)
             continue
         if _FINISHED in line:
             current["finished"] = True

@@ -199,7 +199,9 @@ class CFXRecipeTests(unittest.TestCase):
     def test_log_result_path_must_match_the_declared_result(self) -> None:
         def mismatched(cwd, run_dir, log_name):
             (cwd / "model_001.res").write_text("result", encoding="utf-8")
-            (cwd / "model_001.out").write_text(SOLVER_LOG + " D:\\cases\\other_002.res\n", encoding="utf-8")
+            footer = (" | The results from this run of the ANSYS CFX Solver have been |\n"
+                      " | written to |\n | D:\\cases\\other_002.res |\n +------------------+\n")
+            (cwd / "model_001.out").write_text(SOLVER_LOG + footer, encoding="utf-8")
 
         result = self._run(self.recipe({"op": "solve", "def_path": "model.def",
                                         "res_path": "model_001.res", "run_name": "model"}), FakeRunner(mismatched))
