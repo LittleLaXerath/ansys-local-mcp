@@ -28,6 +28,8 @@ class ProcessResult:
     termination_error: str | None = None
     cancelled: bool = False
     identity: dict[str, Any] | None = None
+    handoff_supervised: bool = False
+    job_processes_at_exit: int | None = None
 
 
 _DETACHED_PROCESSES: dict[int, subprocess.Popen[bytes]] = {}
@@ -163,6 +165,7 @@ def run_process(
     log_name: str,
     detached: bool = False,
     cancellation_token: CancellationToken | None = None,
+    supervise_handoff: bool = False,
 ) -> ProcessResult:
     token = cancellation_token or current_cancellation_token()
     if token:
@@ -232,8 +235,20 @@ def run_process(
         cancelled = False
         termination_error = None
         deadline = started + timeout_seconds
+        # Opt-in hand-off policy: a launcher may exit after spawning the real
+        # product process. Keep supervising the job's remaining processes so the
+        # deadline and cancellation still apply, without disabling job cleanup.
+        handoff = bool(supervise_handoff and job_handle and _job_active_processes(job_handle) is not None)
+        job_processes_at_exit: int | None = None
         try:
-            while proc.poll() is None:
+            while True:
+                parent_done = proc.poll() is not None
+                if parent_done and not handoff:
+                    break
+                if parent_done:
+                    job_processes_at_exit = _job_active_processes(job_handle)
+                    if job_processes_at_exit is None or job_processes_at_exit <= 0:
+                        break
                 cancelled = bool(token and token.cancelled)
                 timed_out = not cancelled and time.monotonic() >= deadline
                 if cancelled or timed_out:
@@ -244,11 +259,17 @@ def run_process(
                         proc.kill()
                         proc.wait(timeout=3)
                     break
-                try:
-                    proc.wait(timeout=min(0.1, max(0.001, deadline - time.monotonic())))
-                except subprocess.TimeoutExpired:
-                    pass
+                wait = min(0.1, max(0.001, deadline - time.monotonic()))
+                if parent_done:
+                    time.sleep(wait)
+                else:
+                    try:
+                        proc.wait(timeout=wait)
+                    except subprocess.TimeoutExpired:
+                        pass
             returncode = proc.returncode
+            if handoff and job_processes_at_exit is None:
+                job_processes_at_exit = _job_active_processes(job_handle)
         finally:
             if job_handle:
                 _close_windows_handle(job_handle)
@@ -270,6 +291,8 @@ def run_process(
         termination_error=termination_error,
         cancelled=cancelled,
         identity=identity,
+        handoff_supervised=handoff,
+        job_processes_at_exit=job_processes_at_exit,
     )
 
 
@@ -340,6 +363,36 @@ def _close_windows_handle(handle: int) -> None:
         ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(ctypes.c_void_p(handle))
     except Exception:
         pass
+
+
+class _JOBOBJECT_BASIC_ACCOUNTING_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("TotalUserTime", ctypes.c_int64),
+        ("TotalKernelTime", ctypes.c_int64),
+        ("ThisPeriodTotalUserTime", ctypes.c_int64),
+        ("ThisPeriodTotalKernelTime", ctypes.c_int64),
+        ("TotalPageFaultCount", ctypes.c_uint32),
+        ("TotalProcesses", ctypes.c_uint32),
+        ("ActiveProcesses", ctypes.c_uint32),
+        ("TotalTerminatedProcesses", ctypes.c_uint32),
+    ]
+
+
+def _job_active_processes(job_handle: int | None) -> int | None:
+    """Return the number of live processes in the job, or None if unavailable."""
+    if os.name != "nt" or not job_handle:  # pragma: no cover - Linux CI
+        return None
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.QueryInformationJobObject.argtypes = [
+            ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p,
+        ]
+        info = _JOBOBJECT_BASIC_ACCOUNTING_INFORMATION()
+        ok = kernel32.QueryInformationJobObject(
+            ctypes.c_void_p(job_handle), 1, ctypes.byref(info), ctypes.sizeof(info), None)
+        return int(info.ActiveProcesses) if ok else None
+    except Exception:  # pragma: no cover - platform fallback
+        return None
 
 
 def _resume_windows_process(proc: subprocess.Popen[bytes]) -> str | None:

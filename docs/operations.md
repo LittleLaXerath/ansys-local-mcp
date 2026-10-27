@@ -17,6 +17,17 @@ Use different output filenames when comparing ordinary and elevated sessions.
 `run_checks` disables both product and UAC test opt-ins and records unique
 affected test IDs: one test can generate an error in both its body and cleanup.
 
+## CFX launcher hand-off diagnostics
+
+```powershell
+python -m tools.diagnose_cfx_launch --output .ansys_mcp/diagnostics/cfx-launch.json
+```
+
+Runs synthetic launchers through the shared supervisor and records the default
+versus supervised hand-off policy, timeout and cancellation cleanup. It never
+starts a CFX executable; the report also contains the command template for a
+later, explicitly authorized official-vs-MCP comparison.
+
 On the measured Windows installation, the medium token was denied at
 `Win32_Process.Create`, while the normally elevated token succeeded. This
 does not mean all WMI calls require administrator privileges. The independent

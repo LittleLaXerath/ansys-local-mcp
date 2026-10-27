@@ -26,6 +26,9 @@ ERROR_OUTPUT_STALE = "CFX_OUTPUT_STALE"
 ERROR_RESULT_MISSING = "CFX_RESULT_MISSING"
 ERROR_RESULT_STALE = "CFX_RESULT_STALE"
 ERROR_LOG_MISSING = "CFX_LOG_MISSING"
+ERROR_LOG_STALE = "CFX_LOG_STALE"
+ERROR_RESULT_UNDECLARED = "CFX_RESULT_UNDECLARED"
+ERROR_RESULT_PATH_MISMATCH = "CFX_RESULT_PATH_MISMATCH"
 ERROR_SOLVER_INCOMPLETE = "CFX_SOLVER_INCOMPLETE"
 ERROR_OUTCOME_UNVERIFIED = "CFX_OUTCOME_UNVERIFIED"
 ERROR_PROCESS_NONZERO = "CFX_PROCESS_NONZERO"
@@ -113,12 +116,24 @@ def _argv(recipe: CFXRecipe, paths: dict[str, Any]) -> tuple[str, Path, list[str
 
 def _artifact(path: Path | None, started_ns: int) -> dict[str, Any]:
     if path is None:
-        return {"path": None, "declared": False}
+        return {"path": None, "declared": False, "size": 0}
     try:
         info = path.stat()
     except OSError:
-        return {"path": str(path), "declared": True, "exists": False, "fresh": False}
+        return {"path": str(path), "declared": True, "exists": False, "fresh": False, "size": 0}
     return {"path": str(path), "declared": True, "exists": True, "size": info.st_size,
+            "mtime_ns": info.st_mtime_ns, "fresh": info.st_mtime_ns >= started_ns}
+
+
+def _log_status(path: Path | None, started_ns: int) -> dict[str, Any] | None:
+    """Describe a solver log without reading it; missing and stale stay distinct."""
+    if path is None:
+        return None
+    try:
+        info = path.stat()
+    except OSError:
+        return {"path": str(path), "exists": False, "fresh": False, "size": 0}
+    return {"path": str(path), "exists": True, "size": info.st_size,
             "mtime_ns": info.st_mtime_ns, "fresh": info.st_mtime_ns >= started_ns}
 
 
@@ -147,7 +162,7 @@ def run_cfx_recipe(recipe: CFXRecipe, *, workdir: Path, run_dir: Path, timeout_s
     started_ns = time.time_ns()
     process = (runner or run_process)(
         argv, cwd=workdir, env=env or ansys_env(), timeout_seconds=timeout_seconds,
-        run_dir=run_dir, log_name=log_name,
+        run_dir=run_dir, log_name=log_name, supervise_handoff=True,
     )
     diagnostics: list[dict[str, Any]] = []
     artifacts: list[dict[str, Any]] = []
@@ -166,9 +181,9 @@ def run_cfx_recipe(recipe: CFXRecipe, *, workdir: Path, run_dir: Path, timeout_s
     elif isinstance(op, CFXPreOperation):
         artifact = _artifact(paths["def_path"], started_ns)
         artifacts.append({**artifact, "role": "def"})
-        if paths["def_path"] is not None and not artifact.get("exists"):
+        if paths["def_path"] is not None and (not artifact.get("exists") or int(artifact.get("size") or 0) <= 0):
             status = "failed"
-            diagnostics.append(_diagnostic(ERROR_OUTPUT_MISSING, "Expected .def was not written by CFX-Pre."))
+            diagnostics.append(_diagnostic(ERROR_OUTPUT_MISSING, "Expected .def is missing or empty; CFX-Pre did not write a new output."))
         elif paths["def_path"] is not None and not artifact.get("fresh"):
             status = "failed"
             diagnostics.append(_diagnostic(ERROR_OUTPUT_STALE, "Existing .def predates this run and is not a new output."))
@@ -177,53 +192,70 @@ def run_cfx_recipe(recipe: CFXRecipe, *, workdir: Path, run_dir: Path, timeout_s
             if paths["def_path"] is None:
                 diagnostics.append(_diagnostic("CFX_OUTPUT_UNDECLARED", "No .def was declared; output was not verified.", "warning"))
     elif isinstance(op, CFXSolveOperation):
+        declared_result = paths["res_path"] is not None
         result = _artifact(paths["res_path"], started_ns)
         artifacts.append({**result, "role": "res"})
+        result_size = int(result.get("size") or 0)
+        fresh_result = bool(result.get("fresh") and result_size > 0) if declared_result else None
         log_path = _solve_log_path(op, paths, workdir)
+        log_status = _log_status(log_path, started_ns)
         monitor: dict[str, Any] | None = None
-        if log_path is not None:
+        if log_status is not None and log_status.get("exists") and log_status.get("fresh"):
             read = read_cfx_log(log_path)
             if read.get("ok"):
                 monitor = summarize(read["state"])
                 completion.update(finished_marker=monitor["finished_marker"],
                                   end_time_reached=monitor["end_time_reached"],
                                   end_time_source="log")
-        else:
-            completion.update(finished_marker=None, end_time_reached=None)
-        fresh_result = paths["res_path"] is None or result.get("fresh")
-        if paths["res_path"] is not None and not result.get("exists"):
+        elif log_status is not None and log_status.get("exists"):
+            diagnostics.append(_diagnostic(
+                ERROR_LOG_STALE, "Solver log predates this run; it cannot prove completion of this run."))
+        if not declared_result:
+            # Without a declared result there is no artifact whose freshness can
+            # be confirmed; a finished log alone is not a verified result.
+            status = "incomplete"
+            diagnostics.append(_diagnostic(
+                ERROR_RESULT_UNDECLARED, "No result file was declared; result freshness is unknown.", "warning"))
+            if log_status is None:
+                diagnostics.append(_diagnostic(ERROR_LOG_MISSING, "Solver log was not found; completion could not be verified."))
+        elif not result.get("exists"):
             status = "failed"
             diagnostics.append(_diagnostic(ERROR_RESULT_MISSING, "Declared result file was not produced by this run."))
-        elif paths["res_path"] is not None and not result.get("fresh"):
+        elif not fresh_result:
             status = "failed"
-            diagnostics.append(_diagnostic(ERROR_RESULT_STALE, "Existing result file predates this run and is not a new result."))
+            diagnostics.append(_diagnostic(ERROR_RESULT_STALE, "Declared result file predates this run or is empty."))
         elif monitor is None:
-            status = "failed" if paths["res_path"] is None else "incomplete"
-            diagnostics.append(_diagnostic(ERROR_LOG_MISSING, "Solver log was not found; completion could not be verified.", "warning" if paths["res_path"] else "error"))
-        elif monitor["finished_marker"]:
-            status = "complete"
-        elif monitor["end_time_reached"] and fresh_result:
-            status = "complete"
-            diagnostics.append(_diagnostic("CFX_FINISH_MARKER_MISSING", "End time was reached but the finish marker is absent.", "warning"))
-        else:
+            status = "incomplete"
+            if log_status is None or not log_status.get("exists"):
+                diagnostics.append(_diagnostic(ERROR_LOG_MISSING, "Solver log was not found; completion could not be verified."))
+        elif not monitor["finished_marker"] and not monitor["end_time_reached"]:
             status = "incomplete"
             diagnostics.append(_diagnostic(
                 ERROR_SOLVER_INCOMPLETE,
-                "The launcher exited before the solver reported completion. A CFX launcher may hand off to another "
-                "process that is killed when the supervisor's job closes; verify the solver separately."))
+                "The run ended before the solver reported completion (finish marker absent, end time not reached)."))
+        elif monitor["result_path_from_log"] and Path(monitor["result_path_from_log"]).resolve() != paths["res_path"].resolve():
+            status = "incomplete"
+            diagnostics.append(_diagnostic(
+                ERROR_RESULT_PATH_MISMATCH, "Solver log names a different result path than the declared result."))
+        elif not monitor["finished_marker"]:
+            status = "complete"
+            diagnostics.append(_diagnostic("CFX_FINISH_MARKER_MISSING", "End time was reached but the finish marker is absent.", "warning"))
+        else:
+            status = "complete"
         if log_path is not None and monitor is not None:
             outputs["monitor"] = monitor
             outputs["log_path"] = str(log_path)
-        completion.update(result_declared=paths["res_path"] is not None, result_fresh=fresh_result,
+        completion.update(result_declared=declared_result, result_fresh=fresh_result, result_size=result_size,
+                          log_fresh=None if log_status is None else bool(log_status.get("fresh")),
                           monitor_available=monitor is not None)
     else:  # CFXPostOperation
         status = "complete"
         for name, path in paths["outputs"]:
             artifact = _artifact(path, started_ns)
             artifacts.append({**artifact, "role": "output", "name": name})
-            if not artifact.get("exists"):
+            if not artifact.get("exists") or int(artifact.get("size") or 0) <= 0:
                 status = "failed"
-                diagnostics.append(_diagnostic(ERROR_OUTPUT_MISSING, "Declared post-processing output is missing: " + name))
+                diagnostics.append(_diagnostic(ERROR_OUTPUT_MISSING, "Declared post-processing output is missing or empty: " + name))
             elif not artifact.get("fresh"):
                 status = "failed"
                 diagnostics.append(_diagnostic(ERROR_OUTPUT_STALE, "Post-processing output predates this run: " + name))
@@ -243,6 +275,8 @@ def run_cfx_recipe(recipe: CFXRecipe, *, workdir: Path, run_dir: Path, timeout_s
         "command": {"id": command_id, "executable": str(executable), "argv": argv},
         "process": {"returncode": process.returncode, "timed_out": process.timed_out,
                     "cancelled": process.cancelled, "elapsed_s": process.elapsed_s,
+                    "handoff_supervised": process.handoff_supervised,
+                    "job_processes_at_exit": process.job_processes_at_exit,
                     "stdout": str(process.stdout_path), "stderr": str(process.stderr_path),
                     "stdout_tail": process.stdout_tail, "stderr_tail": process.stderr_tail},
         "outputs": outputs,

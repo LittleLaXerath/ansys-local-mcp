@@ -6,8 +6,9 @@ import unittest
 from pathlib import Path
 
 from ansys_mcp.cfx_recipe import (
-    ERROR_LOG_MISSING, ERROR_OUTPUT_MISSING, ERROR_OUTPUT_STALE, ERROR_RESULT_MISSING,
-    ERROR_RESULT_STALE, ERROR_SOLVER_INCOMPLETE, cfx_produced_paths, run_cfx_recipe,
+    ERROR_LOG_MISSING, ERROR_LOG_STALE, ERROR_OUTPUT_MISSING, ERROR_OUTPUT_STALE,
+    ERROR_RESULT_MISSING, ERROR_RESULT_PATH_MISMATCH, ERROR_RESULT_STALE,
+    ERROR_RESULT_UNDECLARED, ERROR_SOLVER_INCOMPLETE, cfx_produced_paths, run_cfx_recipe,
     validate_cfx_recipe_paths,
 )
 from ansys_mcp.cfx_schema import CFXRecipe
@@ -40,9 +41,9 @@ class FakeRunner:
         self.calls: list[dict] = []
         self.effect = effect
 
-    def __call__(self, argv, *, cwd, env, timeout_seconds, run_dir, log_name):
+    def __call__(self, argv, *, cwd, env, timeout_seconds, run_dir, log_name, supervise_handoff=False):
         self.calls.append({"argv": list(argv), "cwd": Path(cwd), "timeout": timeout_seconds,
-                           "log_name": log_name, "env": env})
+                           "log_name": log_name, "env": env, "supervise_handoff": supervise_handoff})
         if self.effect is not None:
             self.effect(Path(cwd), Path(run_dir), log_name)
         stdout = Path(run_dir) / f"{log_name}.stdout.log"
@@ -51,7 +52,7 @@ class FakeRunner:
         stderr.write_text("", encoding="utf-8")
         return ProcessResult(returncode=0, pid=1234, timed_out=False, detached=False,
                              stdout_path=stdout, stderr_path=stderr, stdout_tail="fake stdout",
-                             stderr_tail="", elapsed_s=0.01)
+                             stderr_tail="", elapsed_s=0.01, handoff_supervised=supervise_handoff)
 
 
 class CFXRecipeTests(unittest.TestCase):
@@ -125,20 +126,85 @@ class CFXRecipeTests(unittest.TestCase):
         self.assertTrue(monitor["finished_marker"])
         self.assertIs(monitor["end_time_reached"], True)
         self.assertTrue(result["outputs"]["completion"]["finished_marker"])
+        self.assertTrue(runner.calls[0]["supervise_handoff"])
+        self.assertTrue(result["process"]["handoff_supervised"])
 
-    def test_launcher_handoff_without_result_or_finish_marker_is_incomplete(self) -> None:
+    def test_incomplete_solver_log_with_fresh_result_is_incomplete(self) -> None:
         def partial_log(cwd, run_dir, log_name):
+            (cwd / "model_001.res").write_text("result", encoding="utf-8")
             (cwd / "model_001.out").write_text(
                 " Total Time = 5 [s]\n TIME STEP =     1 SIMULATION TIME = 5.0000E-04 CPU SECONDS = 1.0E+02\n",
                 encoding="utf-8")
 
         runner = FakeRunner(partial_log)
-        recipe = self.recipe({"op": "solve", "def_path": "model.def", "run_name": "model"})
+        recipe = self.recipe({"op": "solve", "def_path": "model.def", "res_path": "model_001.res",
+                              "run_name": "model"})
         result = self._run(recipe, runner)
         self.assertFalse(result["ok"])
         self.assertEqual(result["status"], "incomplete")
         self.assertIn(ERROR_SOLVER_INCOMPLETE, {item["code"] for item in result["diagnostics"]})
         self.assertIs(result["outputs"]["completion"]["finished_marker"], False)
+        self.assertIs(result["outputs"]["completion"]["result_fresh"], True)
+
+    def test_undeclared_result_keeps_freshness_unknown(self) -> None:
+        def finished_log(cwd, run_dir, log_name):
+            (cwd / "model_001.out").write_text(SOLVER_LOG, encoding="utf-8")
+
+        result = self._run(self.recipe({"op": "solve", "def_path": "model.def", "run_name": "model"}),
+                           FakeRunner(finished_log))
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "incomplete")
+        codes = {item["code"] for item in result["diagnostics"]}
+        self.assertIn(ERROR_RESULT_UNDECLARED, codes)
+        self.assertIsNone(result["outputs"]["completion"]["result_fresh"])
+        self.assertIs(result["outputs"]["completion"]["result_declared"], False)
+
+    def test_stale_completion_log_without_declared_result_is_not_complete(self) -> None:
+        old_log = self.root / "model_001.out"
+        old_log.write_text(SOLVER_LOG, encoding="utf-8")
+        self._stale(old_log)
+        result = self._run(self.recipe({"op": "solve", "def_path": "model.def", "run_name": "model"}),
+                           FakeRunner())
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "incomplete")
+        codes = {item["code"] for item in result["diagnostics"]}
+        self.assertIn(ERROR_LOG_STALE, codes)
+
+    def test_stale_log_with_fresh_result_is_not_complete(self) -> None:
+        old_log = self.root / "model_001.out"
+        old_log.write_text(SOLVER_LOG, encoding="utf-8")
+        self._stale(old_log)
+
+        def fresh_result(cwd, run_dir, log_name):
+            (cwd / "model_001.res").write_text("result", encoding="utf-8")
+
+        result = self._run(self.recipe({"op": "solve", "def_path": "model.def",
+                                        "res_path": "model_001.res", "run_name": "model"}), FakeRunner(fresh_result))
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "incomplete")
+        codes = {item["code"] for item in result["diagnostics"]}
+        self.assertIn(ERROR_LOG_STALE, codes)
+        self.assertIs(result["outputs"]["completion"]["log_fresh"], False)
+
+    def test_zero_byte_result_is_rejected(self) -> None:
+        def empty_result(cwd, run_dir, log_name):
+            (cwd / "model_001.res").write_text("", encoding="utf-8")
+            (cwd / "model_001.out").write_text(SOLVER_LOG, encoding="utf-8")
+
+        result = self._run(self.recipe({"op": "solve", "def_path": "model.def",
+                                        "res_path": "model_001.res", "run_name": "model"}), FakeRunner(empty_result))
+        self.assertEqual(result["status"], "failed")
+        self.assertIn(ERROR_RESULT_STALE, {item["code"] for item in result["diagnostics"]})
+
+    def test_log_result_path_must_match_the_declared_result(self) -> None:
+        def mismatched(cwd, run_dir, log_name):
+            (cwd / "model_001.res").write_text("result", encoding="utf-8")
+            (cwd / "model_001.out").write_text(SOLVER_LOG + " D:\\cases\\other_002.res\n", encoding="utf-8")
+
+        result = self._run(self.recipe({"op": "solve", "def_path": "model.def",
+                                        "res_path": "model_001.res", "run_name": "model"}), FakeRunner(mismatched))
+        self.assertEqual(result["status"], "incomplete")
+        self.assertIn(ERROR_RESULT_PATH_MISMATCH, {item["code"] for item in result["diagnostics"]})
 
     def test_declared_result_missing_is_distinct_from_incomplete(self) -> None:
         def only_log(cwd, run_dir, log_name):

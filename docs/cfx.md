@@ -4,24 +4,38 @@ The `cfx` workflow step runs exactly one CFX product process per step:
 `cfx5pre -batch`, `cfx5solve` or `cfx5post -batch`. The recipe is versioned and
 strict; unknown fields are rejected before any process starts.
 
-## Why completion is verified, not assumed
+## Launcher hand-off supervision
 
-A CFX launcher may hand work to another process and exit. The supervisor waits
-for the direct child only, so it can return with a zero exit code while the real
-solver is still starting; closing the kill-on-close job then terminates the
+A CFX launcher may hand work to another process and exit. The generic supervisor
+waits only for the direct child, so it can return with a zero exit code while the
+real solver is still starting; closing the kill-on-close job then terminates the
 hand-off process. A zero exit code is therefore never evidence of a finished
 solve.
 
-The step decides completion from files and log content:
+The `cfx` step opts into `supervise_handoff=True`: after the direct child exits,
+the supervisor keeps waiting for the remaining processes in the same job (job
+accounting), so the hand-off child can finish. The total timeout and
+cancellation still apply and terminate the whole job; job cleanup is not
+disabled globally and other steps keep the default policy.
 
-- Declared outputs must exist **and** have been written during this run
-  (modification time not older than the process start). An older `.def` or
+The `cfx` step decides completion from files and log content:
+
+- Declared outputs must exist, be non-empty **and** have been written during this
+  run (modification time not older than the process start). An older `.def` or
   `.res` is reported as stale, never accepted as a new result.
+- The solver log must also have been written during this run. An old completion
+  log cannot prove completion of this run (`CFX_LOG_STALE`), even if a fresh,
+  partial result file was planted next to it.
 - A solve also reads the solver log (`<run_name>_<n>.out`, a declared
   `out_path`, or `<run_name>.out`). It reports separately: process status,
   finish marker, end-time reached, residual history and result freshness.
+- Without a declared `res_path`, result freshness is **unknown**
+  (`CFX_RESULT_UNDECLARED`) and the step stays `incomplete`, even when a fresh
+  log shows the finish marker.
 - A launcher that exits without a result or finish marker is `incomplete`
   (`CFX_SOLVER_INCOMPLETE`), not `complete`.
+- A log that names a different result path than the declared one is
+  `incomplete` (`CFX_RESULT_PATH_MISMATCH`).
 - Missing monitor values stay unknown; they are never filled with zero and never
   treated as converged.
 
@@ -90,3 +104,12 @@ caller can poll a growing log without duplicating samples.
   completion tests are product-free.
 - The Workbench CCL channel remains available and unchanged for projects,
   geometry and meshing.
+
+## Diagnostics
+
+`python -m tools.diagnose_cfx_launch --output .ansys_mcp/diagnostics/cfx-launch.json`
+runs synthetic launchers through the shared supervisor (default vs supervised
+policy, timeout, cancellation) and records whether the hand-off child completes
+or is cleaned up. It never starts a CFX executable. The report also contains the
+command template for a later, explicitly authorized official-vs-MCP comparison.
+

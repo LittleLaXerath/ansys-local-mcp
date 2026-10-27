@@ -6,12 +6,19 @@
   operation per step, with an `ansys://schema/cfx-recipe` resource. The MCP tool
   count stays at 17 and the step count becomes 10.
 - Verifies CFX completion instead of trusting the exit code: declared outputs
-  must be fresh, solves require a finish marker or a reached end time, and a
-  launcher hand-off that exits early is reported as `incomplete`.
+  must be non-empty and fresh, the solver log must be written during this run,
+  solves require a finish marker or a reached end time, and an undeclared result
+  keeps freshness unknown instead of counting as verified.
+- Adds an opt-in `supervise_handoff` policy to the supervisor: after a launcher
+  exits, remaining job processes are still supervised, while timeout and
+  cancellation keep terminating the whole job. Other steps keep the default
+  policy.
 - Adds an incremental CFX solver-log parser (time steps, simulation time,
   residuals, target, restarts, monitor point names, partial-tail handling).
-- Adds a product-free launcher hand-off regression test that documents the
-  early-exit boundary.
+- Adds product-free launcher hand-off regression tests covering child
+  completion, timeout, cancellation and stale-log misjudgement, plus
+  `tools.diagnose_cfx_launch` for the synthetic matrix and the authorized
+  official-vs-MCP comparison template.
 - Product acceptance for a small CFX case and the Re100 regression remains
   pending and explicitly opt-in.
 
