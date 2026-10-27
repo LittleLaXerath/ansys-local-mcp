@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import allowed_roots, default_workdir, merge_local_no_proxy, require_allowed_path
-from .process_supervisor import launch_independent_process, process_identity_matches, terminate_owned_process
+from .process_supervisor import IndependentWorkerLaunchError, launch_independent_process, process_identity_matches, terminate_owned_process
 
 
 _RUN_ID = re.compile(r"^[a-f0-9]{32}$")
@@ -172,6 +172,13 @@ def start_workflow(
         # A launch with an unknown outcome must be inspected, never replayed.
         result = _failure("JOB_LAUNCH_ERROR", str(exc))
         result["run_id"] = run_id
+        if isinstance(exc, IndependentWorkerLaunchError):
+            result["diagnostics"][0].update(cause=exc.code, phase=exc.phase)
+            if exc.code == "WINDOWS_WORKER_ACCESS_DENIED":
+                # Explicit denial precedes worker creation; keep that known
+                # outcome in the durable catalog instead of inventing a crash.
+                result["outcome"] = "not_started"
+                _write_json(directory / "job.json", {**manifest, **result, "updated_at": _now()})
         return result
 
 

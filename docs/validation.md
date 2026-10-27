@@ -7,6 +7,14 @@ are retained only in the local ignored run directory.
 
 ## Baseline
 
+P1 follow-up (2026-10-28): the medium-session WMI creation denial was compared
+with the same minimal command in a normally elevated session, where it passed.
+The 242-test non-product suite then passed 240 tests with two intentional opt-in
+skips and no failures/errors. This does not add product/numerical coverage.
+Two retained contact/design-point cases were rechecked from their original
+files and imported as hash-bound workflow receipts. No unobserved API calls
+or new solver runs are claimed. See [Operations](operations.md).
+
 - Product baseline: Ansys 2026 R1 on Windows; Python 3.11 client.
 - Standard clients: PyWorkbench 0.14.0, PyMechanical 0.12.12,
   Mechanical stubs 0.1.12, PyDPF 0.16.3.

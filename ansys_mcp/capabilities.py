@@ -440,6 +440,15 @@ def record_runtime_evidence(evidence: dict[str, Any], *, evidence_path: Path | N
                    "status": "unavailable" if not reachable else ("verified" if stage in {"workflow", "solve", "result"} else "reachable"),
                    "unavailable_reason": reason if not reachable else None, "evidence_source": source,
                    "observed_at": observed_at, "backend": backend, **scope}
+    for key in ("run_id", "case_id"):
+        if evidence.get(key) is not None:
+            if not isinstance(evidence[key], str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", evidence[key]):
+                raise ValueError("Invalid evidence provenance identifier.")
+            observation[key] = evidence[key]
+    if evidence.get("receipt_sha256") is not None:
+        if not isinstance(evidence["receipt_sha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", evidence["receipt_sha256"]):
+            raise ValueError("Invalid evidence receipt digest.")
+        observation["receipt_sha256"] = evidence["receipt_sha256"]
     verified_format = evidence.get("verified_format")
     if verified_format is not None:
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", str(verified_format)):
@@ -486,6 +495,13 @@ def _overlay(entry: dict[str, Any], scope: dict[str, Any] | None = None) -> dict
         observations = [value for key, value in _EVIDENCE.items()
                         if key[0] == entry["product"] and key[1] == entry["version"]
                         and key[3] == scope["installation_fingerprint"] and key[4] == entry["qualified_name"]]
+        observations = copy.deepcopy(observations)
+        for observation in observations:
+            if observation.get("receipt_sha256"):
+                from .acceptance_evidence import receipt_provenance_available
+                if not receipt_provenance_available(observation):
+                    observation.update(validation_stage="catalogued", status="evidence_unavailable",
+                                       unavailable_reason="Imported receipt artifacts are unavailable or changed.")
         if observations:
             # Preserve per-backend failures; a failure in one channel must not
             # erase actual evidence from a different channel.
@@ -544,10 +560,17 @@ def capability_catalog_summary(version: str | None = None) -> dict[str, Any]:
 
 
 def query_capabilities(product: str = "mechanical", version: str | None = None, component: str | None = None,
-                       status: str | None = None, offset: int = 0, limit: int = 100) -> dict[str, Any]:
+                       status: str | None = None, offset: int = 0, limit: int = 100, kind: str = "api") -> dict[str, Any]:
     if offset < 0 or not 1 <= limit <= 1000:
         raise ValueError("offset must be nonnegative and limit must be between 1 and 1000.")
     product = product.casefold()
+    if kind not in {"api", "workflow"}:
+        raise ValueError("Capability kind must be api or workflow.")
+    if product not in {"mechanical", "dpf"}:
+        raise ValueError("Product must be mechanical or dpf.")
+    if kind == "workflow":
+        from .acceptance_evidence import query_workflow_evidence
+        return query_workflow_evidence(product, _version(version), component, status, offset, limit)
     if product == "dpf":
         from .dpf import dpf_runtime_info
         records = dpf_runtime_info()["formats"]

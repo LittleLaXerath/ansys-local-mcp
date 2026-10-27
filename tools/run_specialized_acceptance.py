@@ -61,41 +61,7 @@ def prepare(directory: Path, root: Path, *, case: str, backend: str, elevation: 
     return geometry, recipe
 
 
-def validate(report: dict[str, Any]) -> dict[str, Any]:
-    """Independently gate reported solve, retained export, and basic motion."""
-    case = report.get("case")
-    checks: dict[str, bool] = {}
-    checks["solved"] = report.get("status") == "solved" and "done" in report.get("solution_status", "").lower()
-    phases = report.get("progress", [])
-    checks["stages"] = all(phase in phases for phase in ("before_solve", "after_solve", "after_result_evaluation", "after_result_export", "complete"))
-    table = Path(report["result_table"]) if report.get("result_table") else None
-    checks["export_exists"] = bool(table and table.is_file() and table.stat().st_size > 0)
-    result_file = Path(report["result_file"]) if report.get("result_file") else None
-    checks["result_file_exists_after_save"] = bool(result_file and result_file.is_file() and result_file.stat().st_size > 0)
-    displacement = report.get("maximum_deformation_m")
-    checks["finite_displacement"] = type(displacement) in (int, float) and math.isfinite(displacement) and displacement > 0
-    if case == "rigid":
-        expected = report.get("driver", {}).get("speed_m_s", 0) * report.get("end_time_s", 0)
-        checks["driven_joint"] = bool(report.get("joint", {}).get("mobile_ids")) and "translational" in report.get("joint", {}).get("type", "").lower()
-        checks["prescribed_motion"] = bool(checks["finite_displacement"] and expected > 0 and abs(displacement / expected - 1) <= 0.01)
-    elif case in {"explicit", "lsdyna"}:
-        initial = report.get("initial_velocity_m_s", [0, 0, 0])
-        speed = -initial[2] if isinstance(initial, list) and len(initial) == 3 else 0
-        end_time = report.get("end_time_s", 0)
-        gap = report.get("geometry", {}).get("gap_m", 0)
-        checks["low_speed_after_contact"] = 0 < speed <= 0.1 and gap > 0 and end_time > gap / speed
-        checks["mesh"] = report.get("mesh", {}).get("elements", 0) > 0
-        checks["frictionless_contact"] = "frictionless" in report.get("contact", {}).get("type", "").lower()
-        checks["no_enabled_exposed_erosion_controls"] = not any(report.get("erosion", {}).values())
-        # Free flight without contact must fail this check (not merely complete).
-        checks["contact_changed_motion"] = bool(checks["finite_displacement"] and speed > 0 and displacement < 0.8 * speed * end_time)
-    else:
-        checks["known_case"] = False
-    not_claimed = ["energy_convergence", "mesh_convergence", "material_failure"]
-    if case in {"explicit", "lsdyna"} and not report.get("erosion"):
-        not_claimed.append("unexposed_erosion_controls")
-    return {"ok": all(checks.values()), "case": case, "checks": checks,
-            "level": "product_solve_and_motion_sanity", "not_claimed": not_claimed}
+from ansys_mcp.benchmarks import validate_specialized as validate
 
 
 def resolve_saved_result_path(report: dict[str, Any], project_path: Path) -> dict[str, Any]:

@@ -53,7 +53,11 @@ class ProductStepIntegrationTests(unittest.TestCase):
         runner.assert_called_once()
 
     def test_new_tools_and_schemas_are_exposed(self):
-        names = {item.name for item in asyncio.run(mcp.list_tools())}
+        tools = asyncio.run(mcp.list_tools())
+        names = {item.name for item in tools}
+        self.assertEqual(len(tools), 17)
+        query = next(item for item in tools if item.name == "query_capabilities")
+        self.assertEqual(query.inputSchema["properties"]["kind"]["enum"], ["api", "workflow"])
         self.assertTrue({"start_workflow", "get_workflow_status", "cancel_workflow", "query_capabilities", "get_mechanical_request_status"} <= names)
         resources = {str(item.uri) for item in asyncio.run(mcp.list_resources())}
         self.assertTrue({"ansys://schema/mechanical-recipe", "ansys://schema/dpf-recipe"} <= resources)

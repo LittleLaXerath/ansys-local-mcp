@@ -29,15 +29,7 @@ from ansys_mcp.mechanical import (
 from ansys_mcp.workflow import run_workflow
 
 
-def analytic_references(length_m: float, width_m: float, height_m: float,
-                        young_pa: float, density_kg_m3: float, conductivity_w_mk: float) -> dict[str, float]:
-    if min(length_m, width_m, height_m, young_pa, density_kg_m3, conductivity_w_mk) <= 0:
-        raise ValueError("Benchmark dimensions and material properties must be positive.")
-    inertia = width_m * height_m**3 / 12
-    area = width_m * height_m
-    return {"static_tip_m": length_m**3 / (3 * young_pa * inertia),
-            "modal_first_hz": 1.875104068711961**2 / (2 * math.pi * length_m**2) * math.sqrt(young_pa * inertia / (density_kg_m3 * area)),
-            "thermal_flux_w_m2": conductivity_w_mk * 100 / length_m}
+from ansys_mcp.benchmarks import analytic_references
 
 
 def _write_json(path: Path, data: Any) -> None:

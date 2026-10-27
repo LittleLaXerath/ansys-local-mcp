@@ -28,9 +28,12 @@ Ordinary CI runs group 1 and 2 only, with the opt-in variables unset.
 ## Baseline record (2026-10-27, local Windows 11, Python 3.11.9)
 
 - `python -m unittest discover tests` considered **224 tests: 208 passed,
-  3 failed, 11 errored, 2 skipped** (the two skips are the explicit opt-in
+  3 failed, 11 error records, 2 skipped** (the two skips are the explicit opt-in
   product and UAC tests).
-- All 14 failing/erroring cases are in `test_execution_runtime.py` and share one
+- Correction: there are 13 unique affected tests, not 14 independent cases;
+  one test also errors during cleanup. The earlier manually calculated 208
+  passing count should not be interpreted as a unique-test count.
+- All affected tests are in `test_execution_runtime.py` and share one
   environment blocker: the session ran with a **medium-integrity, deny-only
   administrators token**, so `Win32_Process.Create` over WMI returns
   `SWbemServicesEx Access denied`. The worker launcher intentionally has no
@@ -49,6 +52,20 @@ Ordinary CI runs group 1 and 2 only, with the opt-in variables unset.
 - Skipped runs are recorded as skips. The product and numerical evidence in
   [validation.md](validation.md) comes from separate real-product runs, not
   from this suite.
+
+## P1 comparison and completion (2026-10-28)
+
+- Ordinary Python subprocess creation, COM import and WMI queries passed in
+  the medium session; WMI `Win32_Process.Create` returned Access denied.
+- The same diagnostic in a normally elevated session passed WMI creation.
+  It had high integrity and no Windows security settings were changed.
+- Baseline recheck: 224 considered, 222 passed, two intentional skips, zero
+  failures/errors. After the new retention, receipt and diagnostics tests:
+  **242 considered, 240 passed, two intentional skips, zero failures/errors**.
+- Both runs forced product and UAC test opt-ins off. They establish ordinary
+  worker lifecycle behavior in that permitted environment, not new Ansys solves.
+- `tools.run_checks` records unique affected test IDs and UTF-8 logs. See
+  [Operations](operations.md) for commands, receipt and maintenance boundaries.
 
 ## Evidence store
 

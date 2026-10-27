@@ -1,5 +1,9 @@
 # Ansys 本地 MCP 服务器
 
+后台权限诊断、默认 dry-run 的日志维护和可核查验收回执见[运行维护说明](docs/operations.md)。
+`query_capabilities(kind="workflow")` 查询工作流证据，默认 `kind="api"` 仍查询公开 API 目录。
+工具数量保持 17 个。
+
 [主页面](README.md) | [English README](README.en.md)
 
 这是一个实验性的 Windows 本地 MCP 服务器，通过严格 JSON 工作流、结构化 Workbench recipe、直接产品命令和通用 PyFluent 操作编排 Ansys。

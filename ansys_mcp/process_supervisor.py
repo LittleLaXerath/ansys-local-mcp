@@ -479,6 +479,14 @@ def terminate_owned_process(identity: dict[str, Any]) -> bool:
         return False
 
 
+class IndependentWorkerLaunchError(RuntimeError):
+    def __init__(self, phase: str, detail: str, access_denied: bool = False):
+        self.phase = phase
+        self.code = "WINDOWS_WORKER_ACCESS_DENIED" if access_denied else "WINDOWS_WORKER_LAUNCH_ERROR"
+        super().__init__(self.code + " during " + phase + ": " + detail +
+                         "; no alternate worker was started and no operation was replayed.")
+
+
 def launch_independent_process(argv: list[str], *, cwd: Path, env: dict[str, str],
                                com_cache_dir: Path | None = None) -> dict[str, Any]:
     """Create a durable worker outside the MCP client's process lifetime.
@@ -507,20 +515,35 @@ def launch_independent_process(argv: list[str], *, cwd: Path, env: dict[str, str
             raise RuntimeError("Independent Windows workers require pywin32; no lifetime-bound fallback was started.") from exc
 
         def create() -> int:
-            services = win32com.client.GetObject("winmgmts:{impersonationLevel=impersonate}!\\\\.\\root\\cimv2")
-            startup = services.Get("Win32_ProcessStartup").SpawnInstance_()
-            startup.ShowWindow = 0
-            startup.EnvironmentVariables = [str(key) + "=" + str(value) for key, value in env.items()]
-            method = services.Get("Win32_Process").Methods_("Create")
-            parameters = method.InParameters.SpawnInstance_()
-            parameters.CommandLine = subprocess.list2cmdline(argv)
-            parameters.CurrentDirectory = str(cwd)
-            parameters.ProcessStartupInformation = startup
-            output = services.ExecMethod("Win32_Process", "Create", parameters)
-            code = int(output.Properties_("ReturnValue").Value)
-            if code:
-                raise OSError("Independent Windows worker creation failed (WMI return code " + str(code) + "); no fallback was started.")
-            return int(output.Properties_("ProcessId").Value)
+            services = startup = method = parameters = output = None
+            phase, failure, pid = "wmi_connect", None, None
+            try:
+                services = win32com.client.GetObject("winmgmts:{impersonationLevel=impersonate}!\\\\.\\root\\cimv2")
+                phase = "wmi_startup"
+                startup = services.Get("Win32_ProcessStartup").SpawnInstance_()
+                startup.ShowWindow = 0
+                startup.EnvironmentVariables = [str(key) + "=" + str(value) for key, value in env.items()]
+                method = services.Get("Win32_Process").Methods_("Create")
+                parameters = method.InParameters.SpawnInstance_()
+                parameters.CommandLine = subprocess.list2cmdline(argv)
+                parameters.CurrentDirectory = str(cwd)
+                parameters.ProcessStartupInformation = startup
+                phase = "wmi_create"
+                output = services.ExecMethod("Win32_Process", "Create", parameters)
+                code = int(output.Properties_("ReturnValue").Value)
+                if code:
+                    failure = IndependentWorkerLaunchError(phase, "WMI return code " + str(code), code in {2, 3})
+                else:
+                    pid = int(output.Properties_("ProcessId").Value)
+            except Exception as exc:
+                info = getattr(exc, "excepinfo", None)
+                denied = (bool(info) and info[-1] in {-2147217405, -2147024891}) or getattr(exc, "winerror", None) == 5
+                failure = IndependentWorkerLaunchError(phase, str(exc), bool(denied))
+            finally:
+                output = parameters = method = startup = services = None
+            if failure:
+                raise failure
+            return pid
 
         pythoncom.CoInitialize()
         try:

@@ -26,10 +26,17 @@ Only measured evidence moves an item forward; a plan entry is not a result.
 
 ## K-02 · Durable workers cannot start in restricted Windows sessions — `blocked`
 
+2026-10-28 comparison: the same ordinary Python/WMI diagnostic succeeded in a
+normally elevated session (high integrity) and was denied in the measured medium
+session. The completed P1 suite considered 242 tests: 240 passed, two intentional
+opt-in tests skipped, no failures or errors. The medium-session limitation remains;
+no automatic elevation, permission-policy change or lifetime-bound fallback was added.
+
 - **Observed**: in a session whose token is medium-integrity with the
   administrators group deny-only, `Win32_Process.Create`
   (`SWbemServicesEx Access denied`) fails, so `start_workflow` and elevation
-  sessions report `JOB_LAUNCH_ERROR`. 14 lifecycle tests are affected.
+  sessions report `JOB_LAUNCH_ERROR`. The historical log contains 14 failure/error
+  records for 13 unique tests, including one cleanup-stage duplicate.
 - **Why it is correct to fail closed**: the launcher deliberately has no
   lifetime-bound fallback, because a worker tied to the MCP client's Job would
   vanish when the client closes.
@@ -45,7 +52,8 @@ Only measured evidence moves an item forward; a plan entry is not a result.
   writable `TEMP`, for the server and for each job/elevation worker. Child
   product processes keep the inherited environment.
 - **Residual**: the fix is exercised by unit tests only; the full durable-job
-  path still needs a session allowed to create WMI processes (see K-02).
+  path now also passes in the measured elevated non-product test session.
+  The medium-session WMI creation boundary is retained (see K-02).
 
 ## K-04 · Evidence location depends on the startup directory — `fixed-in-tree`
 

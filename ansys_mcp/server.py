@@ -273,10 +273,11 @@ def query_capabilities(
     status: str | None = None,
     offset: int = 0,
     limit: int = 100,
+    kind: Literal["api", "workflow"] = "api",
 ) -> dict[str, Any]:
     """Page the published API catalog and its separate runtime/validation evidence."""
     from .capabilities import query_capabilities as query
-    return query(product=product, version=version, component=component, status=status, offset=offset, limit=limit)
+    return query(product=product, version=version, component=component, status=status, offset=offset, limit=limit, kind=kind)
 
 
 @mcp.tool()

@@ -22,28 +22,7 @@ from ansys_mcp.mechanical import cancel_mechanical_request, mechanical_elevated_
 from tools.run_product_acceptance import _observe_mechanical, _run_geometry, _write_json
 
 
-def validate_contact(report: dict[str, Any], parameters: dict[str, Any]) -> dict[str, Any]:
-    samples = report.get("time_samples", [])
-    checks: dict[str, bool] = {"complete": report.get("stage") == "complete", "two_times": len(samples) == 2}
-    area = float(parameters["width_mm"]) * float(parameters["height_mm"]) / 1e6
-    if len(samples) == 2:
-        for index, sample in enumerate(samples, 1):
-            expected = index * float(parameters["pressure_pa"]) * area
-            reaction = float(sample["reaction_x_n"])
-            checks["reaction_balance_" + str(index)] = math.isfinite(reaction) and abs(reaction - expected) <= 0.02 * expected
-            checks["contact_closed_" + str(index)] = 2 <= float(sample["contact_status_min"]) <= float(sample["contact_status_max"]) <= 3
-            contact_pressure = float(sample["average_contact_pressure_pa"])
-            checks["positive_contact_pressure_" + str(index)] = math.isfinite(contact_pressure) and contact_pressure > 0
-        first = float(samples[0]["maximum_deformation_m"])
-        second = float(samples[1]["maximum_deformation_m"])
-        ratio = second / first if first > 0 else float("nan")
-        checks["double_pressure_response"] = math.isfinite(ratio) and abs(ratio - 2) <= 0.1
-    else:
-        ratio = None
-    expected_table = [0.0, float(parameters["pressure_pa"]), 2 * float(parameters["pressure_pa"])]
-    checks["table_readback"] = report.get("pressure_table", {}).get("values_pa") == expected_table and report.get("pressure_table", {}).get("times_s") == [0.0, 1.0, 2.0]
-    checks["parameter_creation"] = all(report.get("parameters", {}).get(kind, {}).get("id") for kind in ("input", "output"))
-    return {"passed": all(checks.values()), "checks": checks, "deformation_ratio": ratio, "reaction_tolerance_relative": 0.02}
+from ansys_mcp.benchmarks import validate_contact
 
 
 def wrapper(source: Path, parameters: dict[str, Any], target: Path, *, geometry: bool = False) -> Path:
@@ -100,22 +79,7 @@ finally:
     return source.replace("PROJECT_PATH", literal(str(project))).replace("CANDIDATES_JSON", literal(json.dumps(candidates))).replace("OUTPUT_PATH", literal(str(output)))
 
 
-def validate_parameters(report: dict[str, Any]) -> dict[str, Any]:
-    points = report.get("points", [])
-    checks = {"two_updated_points": len(points) == 2, "unique_design_points": len({point.get("name") for point in points}) == 2}
-    for index, expected in enumerate((0.25, 0.3)):
-        if index >= len(points):
-            continue
-        try:
-            number = r"^\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?)"
-            value = float(re.match(number, points[index]["input"]).group(1))
-            output = float(re.match(number, points[index]["output"]).group(1))
-            checks["readback_" + str(index)] = abs(value - expected) < 1e-12
-            checks["output_" + str(index)] = math.isfinite(output) and output > 0
-            checks["updated_" + str(index)] = all(points[index].get(field) is True for field in ("up_to_date", "retained_valid", "input_up_to_date", "output_up_to_date"))
-        except (AttributeError, KeyError, TypeError, ValueError):
-            checks["readback_" + str(index)] = False
-    return {"passed": report.get("ok") is True and all(checks.values()), "checks": checks}
+from ansys_mcp.benchmarks import validate_parameters
 
 
 def cancel_original(result: dict[str, Any], root: Path, directory: Path) -> None:

@@ -1,5 +1,10 @@
 # Ansys Local MCP Server
 
+Worker permission diagnostics, dry-run log retention and hash-checked workflow
+receipt imports are described in [Operations](docs/operations.md).
+`query_capabilities(kind="workflow")` queries verified receipts; its default
+`kind="api"` remains the public API catalog. There are still 17 tools.
+
 [Main page](README.md) | [中文说明](README.zh-CN.md)
 
 An experimental Windows-local MCP server for orchestrating Ansys through strict

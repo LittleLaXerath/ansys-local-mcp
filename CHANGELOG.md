@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.1
+
+- Isolates pywin32 caches and exposes an explicit allowed-root evidence store.
+- Adds ordinary/elevated worker diagnostics and unique test-outcome reports.
+- Records explicit WMI denial as a known, non-replayed launch failure and
+  releases COM objects before uninitializing their apartment.
+- Adds default-dry-run retention for revalidated, finished-workflow log files.
+- Adds hash-bound, independently checked Mechanical acceptance receipts and
+  `query_capabilities(kind="workflow")` without adding MCP tools.
+- Shares product-free benchmark validators between runners and receipt imports.
+- Preserves the medium-token WMI restriction as a measured compatibility boundary.
+
 ## 0.3.0
 
 - Adds versioned Mechanical/DPF workflow steps while retaining Workflow v1 and
