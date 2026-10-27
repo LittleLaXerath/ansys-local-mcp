@@ -4,6 +4,7 @@ import ctypes
 import os
 import signal
 import subprocess
+import tempfile
 import threading
 import time
 from contextlib import contextmanager
@@ -30,6 +31,53 @@ class ProcessResult:
 
 
 _DETACHED_PROCESSES: dict[int, subprocess.Popen[bytes]] = {}
+_COM_CACHE_LOCK = threading.Lock()
+_COM_CACHE_PATH: Path | None = None
+
+
+def prepare_python_com_cache(directory: Path | None = None) -> Path:
+    """Import win32com against a private, writable generated-type cache.
+
+    pywin32 resolves its ``gen_py`` cache from ``%TEMP%`` (unless a registry
+    override exists) while ``import win32com.client`` runs. A cache created by
+    another identity can be unreadable, and ``gencache.Rebuild`` then fails on
+    ``__init__.py`` before any worker process exists. Importing once with a
+    private TEMP keeps that shared cache untouched; process children still
+    inherit the unmodified environment, so product scratch files are unaffected.
+    """
+    global _COM_CACHE_PATH
+    target = (Path(directory) if directory is not None
+              else Path(tempfile.gettempdir()) / "ansys_mcp_com_cache" / str(os.getpid()))
+    with _COM_CACHE_LOCK:
+        if _COM_CACHE_PATH is not None:
+            return _COM_CACHE_PATH
+        target.mkdir(parents=True, exist_ok=True)
+        probe = target / ".write-probe"
+        probe.write_text("", encoding="ascii")
+        probe.unlink()
+        saved = {name: os.environ.get(name) for name in ("TEMP", "TMP")}
+        for name in saved:
+            os.environ[name] = str(target)
+        try:
+            import win32com.client  # noqa: F401 - imported once to pin the cache path
+        finally:
+            for name, value in saved.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+        _COM_CACHE_PATH = target
+    return target
+
+
+def prime_python_com_cache(directory: Path | None = None) -> Path | None:
+    """Best-effort COM cache priming for worker processes without pywin32."""
+    if os.name != "nt":  # pragma: no cover - Linux CI
+        return None
+    try:
+        return prepare_python_com_cache(directory)
+    except ImportError:  # pragma: no cover - pywin32 absent
+        return None
 
 
 class WorkflowCancelled(RuntimeError):
@@ -431,7 +479,8 @@ def terminate_owned_process(identity: dict[str, Any]) -> bool:
         return False
 
 
-def launch_independent_process(argv: list[str], *, cwd: Path, env: dict[str, str]) -> dict[str, Any]:
+def launch_independent_process(argv: list[str], *, cwd: Path, env: dict[str, str],
+                               com_cache_dir: Path | None = None) -> dict[str, Any]:
     """Create a durable worker outside the MCP client's process lifetime.
 
     Windows MCP stdio clients use kill-on-close Job Objects without breakaway.
@@ -448,6 +497,10 @@ def launch_independent_process(argv: list[str], *, cwd: Path, env: dict[str, str
         _track_detached_process(proc)
     else:
         try:
+            # Importing win32com resolves pywin32's gen_py cache. Use a private
+            # writable location instead of a shared cache owned by another
+            # identity; otherwise Rebuild() fails before Win32_Process.Create.
+            prepare_python_com_cache(com_cache_dir)
             import pythoncom
             import win32com.client
         except ImportError as exc:

@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .config import allowed_roots, default_workdir, require_allowed_path
+from .config import allowed_roots, default_workdir, merge_local_no_proxy, require_allowed_path
 from .process_supervisor import launch_independent_process, process_identity_matches, terminate_owned_process
 
 
@@ -156,12 +156,13 @@ def start_workflow(
             "owned_processes": [], "result_path": None, "diagnostics": [],
         }
         _write_json(directory / "job.json", manifest)
-        env = os.environ.copy()
+        env = merge_local_no_proxy(os.environ)
         env["ANSYS_MCP_ALLOWED_ROOTS"] = ";".join(str(root) for root in allowed_roots())
         package_root = str(Path(__file__).resolve().parent.parent)
         env["PYTHONPATH"] = package_root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         identity = launch_independent_process(
             [sys.executable, "-m", "ansys_mcp.job_worker", str(directory)], cwd=directory, env=env,
+            com_cache_dir=directory / "comcache",
         )
         manifest["worker"] = identity
         _write_json(directory / "job.json", manifest)

@@ -213,6 +213,47 @@ def safe_workdir(workdir: str | Path | None, fallback: Path) -> Path:
     return path
 
 
+_LOCAL_NO_PROXY = ("127.0.0.1", "localhost", "::1")
+
+
+def merge_local_no_proxy(environ: Mapping[str, str]) -> dict[str, str]:
+    """Return a copy of ``environ`` with loopback entries in NO_PROXY/no_proxy.
+
+    Product workers and local PyMechanical/DPF/PyFluent channels connect over
+    loopback. An inherited HTTP proxy that does not bypass loopback can hijack
+    those connections, so user entries are preserved and the loopback names are
+    appended case-insensitively to both spellings.
+    """
+    env = dict(environ)
+    existing: list[str] = []
+    for name in list(env):
+        if str(name).casefold() == "no_proxy":
+            existing.extend(part.strip() for part in str(env.pop(name)).split(",") if part.strip())
+    merged = list(dict.fromkeys([*existing, *_LOCAL_NO_PROXY]))
+    text = ",".join(merged)
+    env["NO_PROXY"] = text
+    env["no_proxy"] = text
+    return env
+
+
+def evidence_root() -> Path:
+    """Resolve the capability-evidence directory.
+
+    ``ANSYS_MCP_EVIDENCE_ROOT`` overrides the default
+    ``<default workdir>/.ansys_mcp/capability_evidence``. The override must be
+    inside ANSYS_MCP_ALLOWED_ROOTS; an unusable value raises
+    ConfigurationError instead of silently writing elsewhere.
+    """
+    default = default_workdir() / ".ansys_mcp" / "capability_evidence"
+    configured = _env_get_case_insensitive(os.environ, "ANSYS_MCP_EVIDENCE_ROOT")
+    if configured is None or not str(configured).strip():
+        return default
+    try:
+        return require_allowed_path(str(configured).strip(), expect_file=False)
+    except (ValueError, ConfigurationError) as exc:
+        raise ConfigurationError("Invalid ANSYS_MCP_EVIDENCE_ROOT: " + str(exc)) from exc
+
+
 def default_workdir() -> Path:
     info = allowed_roots_info()
     if info.valid:
@@ -247,7 +288,7 @@ def known_paths(root: Path | None = None) -> dict[str, Path]:
 
 
 def ansys_env() -> dict[str, str]:
-    env = os.environ.copy()
+    env = merge_local_no_proxy(os.environ)
     resolution = discover_installation()
     if resolution.root is None:
         return env

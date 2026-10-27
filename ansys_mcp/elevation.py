@@ -21,7 +21,7 @@ from multiprocessing.connection import Client
 from pathlib import Path
 from typing import Any
 
-from .config import allowed_roots, require_allowed_path
+from .config import allowed_roots, merge_local_no_proxy, require_allowed_path
 from .jobs import _read_json, _write_json
 from .process_supervisor import WorkflowCancelled, current_cancellation_token, launch_independent_process, process_identity_matches
 
@@ -121,16 +121,19 @@ class ElevatedSession:
         })
         worker = Path(__file__).with_name("elevation_worker.py")
         parameters = [str(worker), str(directory / "bootstrap.json")]
+        env = merge_local_no_proxy(os.environ)
         if elevated:
             # A runas child can inherit an MCP stdio client's kill-on-close
             # Job. Ask an independent, ordinary WMI process to request UAC so
             # the administrator actor also has an independent lifetime.
             bootstrap = Path(__file__).with_name("elevation_bootstrap.py")
             starter = launch_independent_process([sys.executable, str(bootstrap), str(directory / "bootstrap.json")],
-                                                 cwd=worker.parent.parent, env=os.environ.copy())
+                                                 cwd=worker.parent.parent, env=env,
+                                                 com_cache_dir=directory / "comcache")
             _write_json(directory / "launcher.json", {"worker": starter, "mode": "independent_uac_bootstrap"})
         else:
-            launch_independent_process([sys.executable, *parameters], cwd=worker.parent.parent, env=os.environ.copy())
+            launch_independent_process([sys.executable, *parameters], cwd=worker.parent.parent, env=env,
+                                       com_cache_dir=directory / "comcache")
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             if (directory / "ready.json").exists():

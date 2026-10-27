@@ -47,3 +47,5 @@ private_fingerprints.json
 *.gtm
 *.res
 *.out
+
+ansys_mcp_com_cache/

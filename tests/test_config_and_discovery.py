@@ -159,5 +159,42 @@ class AllowedRootsTests(unittest.TestCase):
         self.assertEqual(result["diagnostics"][0]["code"], "CONFIG_ERROR")
 
 
+class LocalEnvironmentTests(unittest.TestCase):
+    def test_merge_local_no_proxy_preserves_user_entries_and_normalizes_spelling(self) -> None:
+        merged = config.merge_local_no_proxy({"No_Proxy": "corp.local, 10.0.0.0/8", "PATH": "bin"})
+        entries = merged["NO_PROXY"].split(",")
+        self.assertEqual(entries[:2], ["corp.local", "10.0.0.0/8"])
+        for entry in ("127.0.0.1", "localhost", "::1"):
+            self.assertIn(entry, entries)
+        self.assertEqual(merged["no_proxy"], merged["NO_PROXY"])
+        self.assertNotIn("No_Proxy", merged)
+        self.assertEqual(merged["PATH"], "bin")
+
+    def test_merge_local_no_proxy_is_idempotent(self) -> None:
+        once = config.merge_local_no_proxy({})
+        twice = config.merge_local_no_proxy(once)
+        self.assertEqual(once, twice)
+
+    def test_evidence_root_defaults_to_workdir_and_honors_override(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ANSYS_MCP_EVIDENCE_ROOT", None)
+            default = config.evidence_root()
+        self.assertEqual(default, default_workdir() / ".ansys_mcp" / "capability_evidence")
+        with patch.dict(os.environ, {"ANSYS_MCP_EVIDENCE_ROOT": str(PROJECT / "custom-evidence")}, clear=False):
+            self.assertEqual(config.evidence_root(), PROJECT / "custom-evidence")
+        with patch.dict(os.environ, {"ANSYS_MCP_EVIDENCE_ROOT": str(PROJECT.parent / "outside-evidence")}, clear=False):
+            with self.assertRaises(config.ConfigurationError):
+                config.evidence_root()
+
+    @unittest.skipUnless(os.name == "nt", "pywin32 generated-type cache is Windows-only")
+    def test_private_com_cache_is_writable_and_pins_gen_py(self) -> None:
+        from ansys_mcp.process_supervisor import prepare_python_com_cache
+        cache = prepare_python_com_cache()
+        self.assertTrue(cache.is_dir())
+        self.assertTrue((cache / "gen_py").is_dir())
+        import win32com
+        self.assertTrue(Path(win32com.__gen_path__).is_relative_to(cache))
+
+
 if __name__ == "__main__":
     unittest.main()

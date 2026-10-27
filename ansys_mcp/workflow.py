@@ -155,8 +155,9 @@ def inspect_runtime(include_schema: bool = False) -> dict[str, Any]:
             result["dependencies"][package] = {"installed": True, "version": metadata.version(package)}
         except metadata.PackageNotFoundError:
             result["dependencies"][package] = {"installed": False, "version": None}
-    from .capabilities import capability_catalog_summary
+    from .capabilities import capability_catalog_summary, capability_evidence_status
     result["mechanical_catalog"] = capability_catalog_summary(installation.version_tag)
+    result["capability_evidence"] = capability_evidence_status(installation.version_tag)
     from .mechanical import session_summary
     result["mechanical_sessions"] = session_summary()
     if include_schema:

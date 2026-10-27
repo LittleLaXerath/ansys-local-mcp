@@ -216,6 +216,48 @@ _private = 1
                 self.assertEqual(capabilities.query_capabilities(version="261", status="reachable")["total"], 0)
             self.assertEqual(capabilities.query_capabilities(version="261", status="reachable")["total"], 1)
 
+    def test_evidence_root_environment_override_is_reported(self):
+        scope = {"installation_fingerprint": "a" * 64, "version": "261", "current_installation": True}
+        custom = self.root / "custom-evidence"
+        with patch.dict(os.environ, {"ANSYS_MCP_EVIDENCE_ROOT": str(custom)}):
+            with patch.object(capabilities, "_runtime_scope", return_value=scope):
+                target = capabilities._evidence_file("261", scope["installation_fingerprint"])
+                self.assertEqual(target, custom / "v261" / (scope["installation_fingerprint"] + ".jsonl"))
+                status = capabilities.capability_evidence_status("261")
+        self.assertTrue(status["ok"], status)
+        self.assertTrue(status["configured_by_environment"])
+        self.assertEqual(Path(status["root"]), custom.resolve())
+        self.assertEqual(status["installation_fingerprint"], scope["installation_fingerprint"])
+
+    def test_evidence_root_outside_allowed_roots_is_a_configuration_error(self):
+        outside = self.root.parent / "outside-evidence-scope"
+        with patch.dict(os.environ, {"ANSYS_MCP_EVIDENCE_ROOT": str(outside)}):
+            status = capabilities.capability_evidence_status("261")
+            self.assertFalse(status["ok"])
+            self.assertEqual(status["status"], "configuration_error")
+            self.assertIn("ANSYS_MCP_EVIDENCE_ROOT", status["error"])
+            self.assertIsNone(capabilities._evidence_file("261", "b" * 64))
+
+    def test_evidence_status_counts_records_and_reports_corrupt_tail(self):
+        scope = {"installation_fingerprint": "c" * 64, "version": "261", "current_installation": True}
+        with patch.object(capabilities, "_runtime_scope", return_value=scope):
+            target = capabilities._evidence_file("261", scope["installation_fingerprint"])
+            target.parent.mkdir(parents=True)
+            target.write_text(
+                json.dumps(self.external_observation(scope)) + "\n"
+                + json.dumps(self.external_observation(scope, stage="result")) + "\n"
+                + '{"product": "mechanical"\n',
+                encoding="utf-8",
+            )
+            status = capabilities.capability_evidence_status("261")
+        self.assertTrue(status["ok"], status)
+        self.assertTrue(status["exists"])
+        self.assertEqual(status["records"]["total"], 2)
+        self.assertEqual(status["records"]["by_product"], {"mechanical": 2})
+        self.assertEqual(status["records"]["by_stage"], {"object": 1, "result": 1})
+        self.assertEqual(status["records"]["unparsed_lines"], 1)
+        self.assertEqual(status["diagnostics"], [])
+
     def test_installed_v261_inventory_covers_all_source_files(self):
         try:
             root, _ = capabilities._package_root("261")

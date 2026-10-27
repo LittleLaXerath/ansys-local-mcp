@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from .jobs import _TERMINAL, _forced_stop_record, _now, _read_json, _write_json, pending_observations
-from .process_supervisor import CancellationToken, WorkflowCancelled, cancellation_context, process_identity, terminate_owned_process
+from .process_supervisor import (
+    CancellationToken, WorkflowCancelled, cancellation_context, prime_python_com_cache,
+    process_identity, terminate_owned_process,
+)
 
 
 def _publish_result(directory: Path, manifest: dict[str, Any], result: dict[str, Any]) -> None:
@@ -25,6 +28,9 @@ def _publish_result(directory: Path, manifest: dict[str, Any], result: dict[str,
 
 def main() -> None:
     directory = Path(sys.argv[1]).resolve(strict=True)
+    # Pin pywin32's generated-type cache to this job's private directory before
+    # any product module is imported; product children keep the inherited TEMP.
+    prime_python_com_cache(directory / "comcache")
     sys.stdout = (directory / "worker.stdout.log").open("a", encoding="utf-8", buffering=1)
     sys.stderr = (directory / "worker.stderr.log").open("a", encoding="utf-8", buffering=1)
     ready = directory / "launch.ready.json"

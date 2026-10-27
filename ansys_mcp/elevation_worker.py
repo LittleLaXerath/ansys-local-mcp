@@ -20,7 +20,7 @@ if __package__ in {None, ""}:
 
 from ansys_mcp.jobs import _read_json, _write_json
 from ansys_mcp.process_supervisor import (
-    CancellationToken, WorkflowCancelled, cancellation_context,
+    CancellationToken, WorkflowCancelled, cancellation_context, prime_python_com_cache,
     process_identity, process_identity_matches, terminate_owned_process,
 )
 
@@ -28,6 +28,9 @@ from ansys_mcp.process_supervisor import (
 def main() -> None:
     bootstrap_path = Path(sys.argv[1]).resolve(strict=True)
     directory = bootstrap_path.parent
+    # Pin pywin32's generated-type cache to this session's private directory
+    # before the handler (and any product import it performs) is loaded.
+    prime_python_com_cache(directory / "comcache")
     bootstrap = _read_json(bootstrap_path)
     sys.stdout = (directory / "worker.stdout.log").open("a", encoding="utf-8", buffering=1)
     sys.stderr = (directory / "worker.stderr.log").open("a", encoding="utf-8", buffering=1)

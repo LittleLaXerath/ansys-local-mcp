@@ -13,6 +13,7 @@ import copy
 import hashlib
 import importlib.metadata
 import json
+import os
 import re
 import stat
 import threading
@@ -101,11 +102,63 @@ def _runtime_scope(version: str) -> dict[str, Any]:
 
 
 def _evidence_file(version: str, fingerprint: str) -> Path | None:
-    from .config import default_workdir, require_allowed_path
+    from .config import evidence_root, require_allowed_path
     try:
-        return require_allowed_path(default_workdir() / ".ansys_mcp" / "capability_evidence" / ("v" + version) / (fingerprint + ".jsonl"), expect_file=True)
+        return require_allowed_path(evidence_root() / ("v" + version) / (fingerprint + ".jsonl"), expect_file=True)
     except (OSError, ValueError):
         return None
+
+
+def capability_evidence_status(version: str) -> dict[str, Any]:
+    """Report the resolved evidence store without granting validation stages."""
+    from .config import ConfigurationError, evidence_root
+    configured = any(str(name).casefold() == "ansys_mcp_evidence_root" for name in os.environ)
+    try:
+        root = evidence_root()
+    except ConfigurationError as exc:
+        return {"ok": False, "status": "configuration_error", "error": str(exc),
+                "configured_by_environment": configured}
+    scope = _runtime_scope(version)
+    directory = root / ("v" + version)
+    target = directory / (scope["installation_fingerprint"] + ".jsonl")
+    records: dict[str, Any] = {"total": 0, "by_product": {}, "by_stage": {}, "unparsed_lines": 0}
+    if target.is_file():
+        try:
+            with target.open("rb") as stream:
+                for line in stream:
+                    try:
+                        observation = json.loads(line)
+                    except (ValueError, TypeError):
+                        records["unparsed_lines"] += 1
+                        continue
+                    if not isinstance(observation, dict):
+                        records["unparsed_lines"] += 1
+                        continue
+                    records["total"] += 1
+                    product = str(observation.get("product"))
+                    stage = str(observation.get("validation_stage"))
+                    records["by_product"][product] = records["by_product"].get(product, 0) + 1
+                    records["by_stage"][stage] = records["by_stage"].get(stage, 0) + 1
+        except OSError as exc:
+            return {"ok": False, "status": "unreadable", "error": str(exc), "root": str(root),
+                    "configured_by_environment": configured}
+    try:
+        other_files = sorted(path.name for path in directory.glob("*.jsonl") if path != target) if directory.is_dir() else []
+    except OSError:
+        other_files = []
+    diagnostics = []
+    if not scope["current_installation"]:
+        diagnostics.append({"code": "EVIDENCE_INSTALLATION_MISMATCH",
+                            "message": "Evidence scope does not match the discovered installation; historical records are not applied."})
+    if not target.is_file() and other_files:
+        diagnostics.append({"code": "EVIDENCE_FINGERPRINT_MISSING",
+                            "message": "Evidence exists only for another installation fingerprint."})
+    return {"ok": True, "status": "ready", "root": str(root), "directory": str(directory),
+            "file": str(target), "exists": target.is_file(), "records": records,
+            "other_fingerprint_files": other_files,
+            "installation_fingerprint": scope["installation_fingerprint"],
+            "current_installation": scope["current_installation"],
+            "configured_by_environment": configured, "diagnostics": diagnostics}
 
 
 def _load_current_evidence(version: str, scope: dict[str, Any]) -> None:
