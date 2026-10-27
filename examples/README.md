@@ -84,6 +84,10 @@ not claim to create a complete simulation from raw geometry.
   [mechanical_workbench.example.json](mechanical_workbench.example.json)
   demonstrate structured object/session operations.
 - [dpf_recipe.example.json](dpf_recipe.example.json) is a standalone DPF recipe.
+- [cfx_recipe.example.json](cfx_recipe.example.json) chains one `cfx` step per
+  operation (pre → solve → post) with declared `.def`/`.res`/image products.
+  The `.pre` and `.cse` scripts are yours; this step does not parse CCL. Completion
+  is verified from fresh outputs and the solver log, not from the exit code.
 - `tools/run_product_acceptance.py` explicitly runs isolated physical benchmarks;
   its original native files and logs stay in the ignored run directory.
 - `tools/run_contact_parameters.py`, `tools/run_result_exports.py` and
@@ -95,6 +99,7 @@ not claim to create a complete simulation from raw geometry.
 
 其他示例分别用于文件操作、旧入口、启动检查和 PyFluent 模板。
 Fluent 脚本仍需真实案例配置；Mechanical 元数据脚本不代表完整仿真设置。
+CFX 示例只负责按步骤执行并校验产物，不解析 CCL。
 材料往返示例是客户端工作流生成器，生成后另行执行，不应作为 Mechanical 产品内脚本发送。
 
 ## Official Interfaces / 官方接口

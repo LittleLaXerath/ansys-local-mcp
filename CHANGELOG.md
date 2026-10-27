@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Adds a versioned `cfx` workflow step for one `cfx5pre`/`cfx5solve`/`cfx5post`
+  operation per step, with an `ansys://schema/cfx-recipe` resource. The MCP tool
+  count stays at 17 and the step count becomes 10.
+- Verifies CFX completion instead of trusting the exit code: declared outputs
+  must be fresh, solves require a finish marker or a reached end time, and a
+  launcher hand-off that exits early is reported as `incomplete`.
+- Adds an incremental CFX solver-log parser (time steps, simulation time,
+  residuals, target, restarts, monitor point names, partial-tail handling).
+- Adds a product-free launcher hand-off regression test that documents the
+  early-exit boundary.
+- Product acceptance for a small CFX case and the Re100 regression remains
+  pending and explicitly opt-in.
+
 ## 0.3.1
 
 - Isolates pywin32 caches and exposes an explicit allowed-root evidence store.

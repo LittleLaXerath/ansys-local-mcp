@@ -19,6 +19,7 @@ This project is not affiliated with, endorsed by, or sponsored by Ansys.
 | Validating | [分级验收记录](docs/validation.md) | [Validation evidence](docs/validation.md) |
 | Testing | [测试分组与基线](docs/testing.md) | [Test groups and baseline](docs/testing.md) |
 | Known issues | [已知问题](docs/known-issues.md) | [Known issues](docs/known-issues.md) |
+| CFX step | [CFX 步骤](docs/cfx.md) | [CFX step](docs/cfx.md) |
 
 ## v0.3 Mechanical and DPF / Mechanical 与 DPF
 

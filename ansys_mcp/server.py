@@ -13,6 +13,7 @@ from .runtime import signature_info
 from .schemas import WorkflowModel, WorkbenchRecipe
 from .mechanical_schema import MechanicalRecipe
 from .dpf_schema import DPFRecipe
+from .cfx_schema import CFXRecipe
 from .workflow import inspect_runtime as inspect_runtime_impl
 from .workflow import run_workflow as run_workflow_impl
 from .workflow import validate_workflow as validate_workflow_impl
@@ -43,6 +44,12 @@ def mechanical_recipe_schema() -> str:
 def dpf_recipe_schema() -> str:
     """Versioned local DPF operations, scoping, and artifact exports."""
     return json.dumps(DPFRecipe.model_json_schema(), indent=2)
+
+
+@mcp.resource("ansys://schema/cfx-recipe", mime_type="application/schema+json")
+def cfx_recipe_schema() -> str:
+    """Versioned CFX pre/solve/post operation with verified completion."""
+    return json.dumps(CFXRecipe.model_json_schema(), indent=2)
 
 
 @mcp.tool()

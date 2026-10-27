@@ -121,6 +121,7 @@ Step types:
 - `workbench`: compile and execute a structured Workbench recipe.
 - `mechanical`: run a versioned Mechanical recipe (objects, sessions, project operations).
 - `dpf`: run a versioned local DPF recipe and export scoped results.
+- `cfx`: run one CFX pre/solve/post operation with verified completion ([details](docs/cfx.md)).
 - `file`: inspect, read, write, or copy local files.
 - `assert`: assert path existence.
 - `collect`: collect required or optional artifacts.

@@ -1,0 +1,63 @@
+{
+  "version": "1",
+  "workdir": "..",
+  "steps": [
+    {
+      "id": "pre",
+      "type": "cfx",
+      "recipe": {
+        "operation": {
+          "op": "pre",
+          "script": "scripts/setup.pre",
+          "def_path": "work/cfx/model.def"
+        }
+      },
+      "produces": [
+        {
+          "path": "work/cfx/model.def"
+        }
+      ]
+    },
+    {
+      "id": "solve",
+      "type": "cfx",
+      "recipe": {
+        "operation": {
+          "op": "solve",
+          "def_path": "${steps.pre.outputs.def_path}",
+          "res_path": "work/cfx/model_001.res",
+          "run_name": "model",
+          "precision": "double",
+          "partitions": 4
+        }
+      },
+      "produces": [
+        {
+          "path": "work/cfx/model_001.res"
+        }
+      ]
+    },
+    {
+      "id": "post",
+      "type": "cfx",
+      "recipe": {
+        "operation": {
+          "op": "post",
+          "script": "scripts/post.cse",
+          "result_file": "${steps.solve.outputs.res_path}",
+          "outputs": [
+            {
+              "name": "velocity",
+              "path": "work/cfx/velocity.png"
+            }
+          ]
+        }
+      },
+      "produces": [
+        {
+          "path": "work/cfx/velocity.png"
+        }
+      ]
+    }
+  ]
+}

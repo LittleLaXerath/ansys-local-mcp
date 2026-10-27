@@ -53,6 +53,7 @@ from .schemas import (
     WorkbenchStep,
     MechanicalStep,
     DPFStep,
+    CFXStep,
     WorkflowModel,
     effective_step_id,
 )
@@ -82,7 +83,7 @@ ERROR_INLINE_CODE_DISABLED = "INLINE_CODE_DISABLED"
 ERROR_ARTIFACT_MISSING = "ARTIFACT_MISSING"
 ERROR_WORKFLOW_CANCELLED = "WORKFLOW_CANCELLED"
 
-STEP_TYPES = ("command", "python_script", "pyfluent", "workbench", "mechanical", "dpf", "file", "assert", "collect")
+STEP_TYPES = ("command", "python_script", "pyfluent", "workbench", "mechanical", "dpf", "cfx", "file", "assert", "collect")
 DEFAULT_RETRY_CODES = {ERROR_PROCESS_LAUNCH, ERROR_PROCESS_TIMEOUT, ERROR_PROCESS_NONZERO}
 _VARIABLE_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 _STEP_REF_PATTERN = STEP_REF_PATTERN
@@ -142,6 +143,7 @@ def inspect_runtime(include_schema: bool = False) -> dict[str, Any]:
                 "workbench_recipe": "ansys://schema/workbench-recipe",
                 "mechanical_recipe": "ansys://schema/mechanical-recipe",
                 "dpf_recipe": "ansys://schema/dpf-recipe",
+                "cfx_recipe": "ansys://schema/cfx-recipe",
             },
         },
         "pyfluent_core": {
@@ -163,11 +165,13 @@ def inspect_runtime(include_schema: bool = False) -> dict[str, Any]:
     if include_schema:
         from .mechanical_schema import MechanicalRecipe
         from .dpf_schema import DPFRecipe
+        from .cfx_schema import CFXRecipe
         result["schemas"] = {
             "workflow": WorkflowModel.model_json_schema(),
             "workbench_recipe": WorkbenchRecipe.model_json_schema(),
             "mechanical_recipe": MechanicalRecipe.model_json_schema(),
             "dpf_recipe": DPFRecipe.model_json_schema(),
+            "cfx_recipe": CFXRecipe.model_json_schema(),
         }
     return result
 
@@ -476,6 +480,17 @@ def _validate_step(
         validate_dpf_recipe_paths(step.recipe, cwd, path_checks=checks)
         if step.retry.max_attempts != 1:
             raise WorkflowProblem(ERROR_VALIDATION, "DPF recipes may write artifacts and must not be automatically replayed.", step_id)
+    elif isinstance(step, CFXStep):
+        from .cfx_recipe import validate_cfx_recipe_paths
+        validate_cfx_recipe_paths(step.recipe, cwd, path_checks=checks)
+        if step.retry.max_attempts != 1:
+            raise WorkflowProblem(ERROR_VALIDATION, "CFX recipes must not be automatically replayed; verify solver state before retrying.", step_id)
+        if mode == "runtime":
+            from .command_registry import command_specs
+            key = {"pre": "cfx_pre", "solve": "cfx_solve", "post": "cfx_post"}[step.recipe.operation.op]
+            executable = command_specs()[key].executable
+            if not executable.is_file():
+                raise WorkflowProblem(ERROR_EXECUTABLE_MISSING, f"CFX executable not found: {executable}", step_id)
     elif isinstance(step, FileStep):
         _validate_file_step(step, checks)
     elif isinstance(step, AssertStep):
@@ -502,6 +517,9 @@ def _produced_paths(step: BaseWorkflowStep) -> list[str]:
     elif isinstance(step, DPFStep):
         from .dpf import dpf_produced_paths
         paths.extend(dpf_produced_paths(step.recipe))
+    elif isinstance(step, CFXStep):
+        from .cfx_recipe import cfx_produced_paths
+        paths.extend(cfx_produced_paths(step.recipe))
     elif isinstance(step, PyFluentStep):
         if step.write:
             paths.extend(step.write.model_dump(exclude_none=True).values())
@@ -706,12 +724,20 @@ def _run_step_once(
             return _run_pyfluent_step(step, step_id, cwd, run_dir, timeout_seconds, attempt, started)
         if isinstance(step, WorkbenchStep):
             return _run_workbench_step(step, step_id, cwd, run_dir, timeout_seconds, attempt, started)
-        if isinstance(step, (MechanicalStep, DPFStep)):
+        if isinstance(step, (MechanicalStep, DPFStep, CFXStep)):
             if isinstance(step, MechanicalStep):
                 from .mechanical import run_mechanical_recipe as run_domain_recipe
+            elif isinstance(step, CFXStep):
+                from .cfx_recipe import run_cfx_recipe as run_domain_recipe
             else:
                 from .dpf import run_dpf_recipe as run_domain_recipe
-            domain = run_domain_recipe(step.recipe, workdir=cwd, run_dir=run_dir, timeout_seconds=timeout_seconds)
+            if isinstance(step, CFXStep):
+                domain = run_domain_recipe(step.recipe, workdir=cwd, run_dir=run_dir,
+                                           timeout_seconds=timeout_seconds,
+                                           env=_run_environment(cwd, run_dir),
+                                           log_name=f"cfx-{step_id}.attempt-{attempt}")
+            else:
+                domain = run_domain_recipe(step.recipe, workdir=cwd, run_dir=run_dir, timeout_seconds=timeout_seconds)
             result = _ok_step(step_id, step.type, started, {"outputs": domain.get("outputs", {})})
             result.update(domain)
             if result.get("status") == "timed_out":

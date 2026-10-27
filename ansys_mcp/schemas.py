@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator,
 
 from .mechanical_schema import MechanicalRecipe
 from .dpf_schema import DPFRecipe
+from .cfx_schema import CFXRecipe
 
 
 ID_PATTERN = r"^[A-Za-z][A-Za-z0-9_-]{0,63}$"
@@ -406,6 +407,11 @@ class DPFStep(BaseWorkflowStep):
     recipe: DPFRecipe
 
 
+class CFXStep(BaseWorkflowStep):
+    type: Literal["cfx"]
+    recipe: CFXRecipe
+
+
 class AssertStep(BaseWorkflowStep):
     type: Literal["assert"]
     path: str
@@ -418,7 +424,7 @@ class CollectStep(BaseWorkflowStep):
 
 
 WorkflowStep = Annotated[
-    Union[CommandStep, PythonScriptStep, PyFluentStep, WorkbenchStep, MechanicalStep, DPFStep, FileStep, AssertStep, CollectStep],
+    Union[CommandStep, PythonScriptStep, PyFluentStep, WorkbenchStep, MechanicalStep, DPFStep, CFXStep, FileStep, AssertStep, CollectStep],
     Field(discriminator="type"),
 ]
 WORKFLOW_STEP_ADAPTER = TypeAdapter(WorkflowStep)

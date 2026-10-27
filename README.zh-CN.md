@@ -96,6 +96,7 @@ Step 类型：
 - `workbench`：编译并执行结构化 Workbench recipe。
 - `mechanical`：执行版本化 Mechanical recipe（对象、会话与工程操作）。
 - `dpf`：执行版本化本地 DPF recipe 并按范围导出结果。
+- `cfx`：执行一次 CFX pre/solve/post 操作并校验完成状态（[说明](docs/cfx.md)）。
 - `file`：检查、读取、写入或复制文件。
 - `assert`：断言路径是否存在。
 - `collect`：收集必需或可选产物。
