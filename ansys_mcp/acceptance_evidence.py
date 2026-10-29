@@ -28,7 +28,7 @@ class EvidenceFile(BaseModel):
 class AcceptanceReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: Literal["1"] = "1"
-    product: Literal["mechanical"] = "mechanical"
+    product: Literal["mechanical", "fluent", "cfx"] = "mechanical"
     product_version: str = Field(pattern=r"^[0-9]{3,4}$")
     backend: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     client_versions: dict[str, str] = Field(default_factory=dict)
@@ -36,7 +36,8 @@ class AcceptanceReceipt(BaseModel):
     case_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     observed_at: datetime
     installation_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
-    validator: Literal["core_beam_scalars", "contact", "parameters", "specialized"]
+    validator: Literal["core_beam_scalars", "contact", "parameters", "specialized", "fluent_channel", "cfx_short_restart"]
+    scope_origin: Literal["run", "historical_revalidation", "unspecified"] = "unspecified"
     report: EvidenceFile
     validation: EvidenceFile
     envelope: EvidenceFile
@@ -45,6 +46,10 @@ class AcceptanceReceipt(BaseModel):
 
     @model_validator(mode="after")
     def dated(self) -> "AcceptanceReceipt":
+        cfd = {"fluent_channel": ("fluent", "pyfluent"), "cfx_short_restart": ("cfx", "official_cfx")}
+        if self.product != "mechanical" or self.validator in cfd:
+            if cfd.get(self.validator) != (self.product, self.backend):
+                raise ValueError("Receipt product/backend/validator do not match.")
         if self.observed_at.tzinfo is None:
             raise ValueError("Evidence timestamp must include its timezone.")
         import re
@@ -91,10 +96,10 @@ def _validate(validator: str, report: dict, parameters: dict, directory: Path) -
 
 
 def inspect_receipt(path: Path) -> dict[str, Any]:
-    from .capabilities import _runtime_scope
+    from .cfd_evidence import workflow_scope
     source = require_allowed_file(path)
     receipt = AcceptanceReceipt.model_validate(_read(source))
-    scope = _runtime_scope(receipt.product_version)
+    scope = workflow_scope(receipt.product, receipt.product_version)
     if not scope.get("current_installation") or scope["installation_fingerprint"] != receipt.installation_fingerprint:
         raise ValueError("Receipt belongs to a different or unavailable product installation.")
     files = [receipt.report, receipt.validation, receipt.envelope, receipt.parameters, *receipt.artifacts]
@@ -117,7 +122,7 @@ def inspect_receipt(path: Path) -> dict[str, Any]:
     if saved_passed is not True or envelope.get("ok") is not True:
         raise ValueError("Failed product execution or numerical validation cannot be imported.")
     session = envelope.get("outputs", {}).get("session", {})
-    if session.get("backend") != receipt.backend or str(session.get("version")) != receipt.product_version:
+    if receipt.product == "mechanical" and (session.get("backend") != receipt.backend or str(session.get("version")) != receipt.product_version):
         raise ValueError("Receipt backend/version does not match the product envelope.")
     # Validators use fixed reference formulas/tolerances; a saved 'ok' alone is
     # insufficient. Serialized NaN/Inf never passes a numeric gate.
@@ -130,9 +135,17 @@ def inspect_receipt(path: Path) -> dict[str, Any]:
             for child in value: finite(child)
     finite(report)
     finite(parameters)
-    checked = _validate(receipt.validator, report, parameters, resolved[receipt.report.path].parent)
+    if receipt.product == "mechanical":
+        checked = _validate(receipt.validator, report, parameters, resolved[receipt.report.path].parent)
+    else:
+        from .cfd_evidence import validate_receipt
+        try:
+            checked = validate_receipt(receipt, report, envelope, parameters, resolved, resolved[receipt.parameters.path].parent, validation)
+        except (KeyError, TypeError, ZeroDivisionError, OverflowError) as exc:
+            raise ValueError("Malformed CFD evidence: " + str(exc)) from exc
     if checked.get("ok") is not True:
-        raise ValueError("Independent numerical revalidation did not pass.")
+        failed = sorted(key for key, value in checked.get("checks", {}).items() if value is False)
+        raise ValueError("Independent numerical revalidation did not pass: " + ", ".join(failed[:16]))
     names = report.get("executed_apis", [])
     if not isinstance(names, list) or any(not isinstance(name, str) for name in names):
         raise ValueError("executed_apis must be a list of observed API names.")
@@ -179,8 +192,8 @@ def import_receipt(path: Path, *, apply: bool = False) -> dict[str, Any]:
 
 def query_workflow_evidence(product: str, version: str, component: str | None, status: str | None,
                             offset: int, limit: int) -> dict[str, Any]:
-    from .capabilities import _runtime_scope
-    scope = _runtime_scope(version)
+    from .cfd_evidence import workflow_scope
+    scope = workflow_scope(product, version)
     root = require_allowed_path(evidence_root() / "workflows" / ("v" + version) / scope["installation_fingerprint"] / product)
     records = []
     for path in sorted(root.glob("*/*.json")) if root.is_dir() else []:
@@ -197,8 +210,14 @@ def query_workflow_evidence(product: str, version: str, component: str | None, s
                 original = require_allowed_file(stored["source"])
                 if file_sha256(original) != stored["source_sha256"]:
                     raise ValueError("Receipt source changed.")
-                inspect_receipt(original)
-                item.update(status="verified", validation_stage="result", artifact_integrity="checked")
+                inspected = inspect_receipt(original)
+                normalized = AcceptanceReceipt.model_validate(receipt).model_dump(mode="json")
+                if normalized != inspected["receipt"]:
+                    raise ValueError("Workflow index does not match its original receipt.")
+                item.update(status="verified", validation_stage="result", artifact_integrity="checked",
+                            scope_origin=normalized["scope_origin"],
+                            checks=inspected["checks"].get("checks", {}), metrics=inspected["checks"].get("metrics", {}),
+                            verification_scope=inspected["checks"].get("scope", "receipt_case_only"))
             except (OSError, ValueError, KeyError, TypeError):
                 item.update(status="unavailable", validation_stage="catalogued", artifact_integrity="unavailable_or_changed")
             if status is None or status in {item["status"], item["validation_stage"]}:

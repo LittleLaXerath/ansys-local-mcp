@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fixes Windows CI evidence-path comparison for 8.3 TEMP aliases without
+  weakening path validation or skipping tests.
+- Adds product-scoped Fluent/CFX workflow receipts, independent revalidation of
+  native exports/fields/logs, explicit historical provenance and read-only
+  queries. Existing Mechanical/DPF evidence identities remain unchanged; CFD
+  API inventory entries are not promoted by these benchmark receipts.
+- Rejects mismatched receipt/index metadata instead of borrowing another
+  valid receipt's verification status.
 - Adds managed Fluent sessions through the existing authenticated worker,
   strict launch/runtime contracts, generation checks and original-request
   observation without automatic replay. Adds native monitor/event/transcript

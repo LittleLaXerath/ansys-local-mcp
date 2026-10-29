@@ -7,6 +7,14 @@ are retained only in the local ignored run directory.
 
 ## Baseline
 
+CFD evidence follow-up (2026-10-29): the retained Fluent channel and CFX short
+restart were independently revalidated and imported as workflow receipts.
+Two fresh MCP connections with different starting directories returned the same
+verified records; the two existing Mechanical workflow receipts remained
+verified. CFD fingerprints are product-specific and captured at historical
+revalidation, not asserted as recorded at the original run. This did not start
+a solver or add full Re100/Mechanical coverage. See [receipts](operations.md#cfd-workflow-receipts).
+
 P3 follow-up (2026-10-29): managed Fluent was recovered by a second stdio MCP
 server, solved a new 2D laminar channel, saved/reopened native case/data and
 closed its owned processes. Poiseuille comparison: profile relative L2 0.103454%,

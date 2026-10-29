@@ -98,7 +98,8 @@ imbalance 0.000130344%. Saved/reopened velocity, pressure and centroid arrays
 were identical. Native monitor, iteration-event and transcript files were
 nonempty. This is one steady solver-channel benchmark, not validation of every
 Fluent model, meshing workflow or transient operation. Ordinary-user WMI limits
-and cross-product evidence receipt integration remain separate follow-up work.
+remain separate follow-up work. The retained channel can now be registered as a
+historically revalidated workflow receipt; see [operations](operations.md#cfd-workflow-receipts).
 
 完整 P3 产品 gate 还要求速度剖面误差 <=2%、压降误差 <=3%、质量不平衡 <=0.01%，
 以及保存重开后一致。未达到这些条件时不得把接口或流程通过写成数值验收通过。

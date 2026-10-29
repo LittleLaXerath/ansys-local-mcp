@@ -75,6 +75,7 @@ class ReceiptTests(unittest.TestCase):
         found = capabilities.query_capabilities(kind="workflow", version="261", component="beam")
         self.assertEqual(found["total"], 1)
         self.assertEqual(found["items"][0]["status"], "verified")
+        self.assertEqual(found["items"][0]["scope_origin"], "unspecified")
         capabilities._load_current_evidence("261", self.scope)
         observed = next(iter(capabilities._EVIDENCE.values()))
         self.assertEqual(observed["case_id"], "beam")

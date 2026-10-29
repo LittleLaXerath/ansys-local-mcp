@@ -165,6 +165,11 @@ Actions：`get_template`、`create_system`、`get_system`、`get_component`、`g
 
 ## PyFluent
 
+Fluent/CFX 数值记录可通过带哈希的回执登记，再用
+`query_capabilities(product="fluent", kind="workflow")` 或 `product="cfx"` 查询。
+查询重新检查原始材料；历史复核明确标注，不提升整个 API 目录等级。
+详见[CFD 回执](docs/operations.md#cfd-workflow-receipts)。
+
 `pyfluent` 保留默认 `mode=batch`，并支持 `mode=persistent` 的创建、复用、查询、关闭，
 可跨 MCP 连接恢复；提供代际检查、原生监控/事件与 transcript 日志。启动字段严格验证，
 禁止自动重放。详见[Fluent 会话说明](docs/fluent.md)和[持久工作流](examples/fluent_persistent.workflow.example.json)。

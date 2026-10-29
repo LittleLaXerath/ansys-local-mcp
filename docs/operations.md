@@ -70,12 +70,12 @@ rechecked workflow in the private evidence store. A receipt contains:
   run ID and case ID; client versions when actually recorded (otherwise empty).
 - Paths and SHA-256 digests for the original report, validation, product envelope,
   parameters and at least one retained product artifact.
-- A fixed validator: `contact`, `parameters`, `specialized`, or
-  `core_beam_scalars`. Their formulas and tolerances are shared with acceptance
+- A fixed validator: `contact`, `parameters`, `specialized`,
+  `core_beam_scalars`, `fluent_channel`, or `cfx_short_restart`. Formulas and tolerances are shared with acceptance
   runners and are packaged with the server; no product process is launched.
 
-The current receipt importers cover the existing Mechanical fixtures. They
-do not establish new DPF reader support. Core beam receipts check reported
+Receipt importers cover the existing Mechanical fixtures and retained CFD
+benchmarks described below. They do not establish new DPF reader support. Core beam receipts check reported
 scalar results only; they do not repeat a nodal DPF comparison. Hash checks
 bind the reports to retained artifacts; importing is not a new solver run.
 
@@ -98,6 +98,52 @@ The default `kind="api"` retains its previous behavior. Workflow queries check
 receipt/artifact integrity again. Imported API evidence also loses its verified
 status if its receipt/artifacts disappear or change, without rewriting history.
 
+### CFD Workflow Receipts
+
+From a source checkout, prepare a **new** private receipt directory:
+
+```powershell
+python -m tools.prepare_cfd_receipt fluent path/to/channel-run --output path/to/new-receipt
+python -m tools.prepare_cfd_receipt cfx path/to/short-restart --output path/to/new-cfx-receipt --reference-specification path/to/original-case-specification.json --reference-forces path/to/original-force-history.csv
+```
+
+Preparation writes only the new receipt and parameter manifest. Import defaults
+to dry-run; use the existing importer with `--apply` after checking its output.
+Never overwrite the original run or change a failed acceptance to passed.
+
+Fluent receipts bind the original workflow sequence, settings/field readback,
+native case/data, mesh, transcript, monitors and events. Fixed Poiseuille checks
+are rerun, including units, material values, mass balance, session identity,
+confirmed shutdown and exact saved/reopened arrays. CFX receipts bind the native
+export, solver log, result/definition/restart, pre/post scripts and original
+specification/force history. The log is reparsed; volume, mass balance, physical
+time, residuals and instantaneous forces are independently rechecked.
+
+CFD fingerprints include the product's own executable(s), root and release,
+not Mechanical binaries. These hashes scope evidence only: they do not query
+licensing or gate validation/execution of modified installations. Existing
+Mechanical/DPF fingerprint identities remain unchanged.
+
+Historical preparation records `scope_origin="historical_revalidation"`:
+the binary fingerprint and observation time are captured at import, not claimed
+as known at the original solver run. A receipt is an auditable check of retained
+outputs, not a new native-file read in Fluent/CFD-Post, a signed attestation or
+proof of general model coverage. Original scripts are hashed, never executed by
+the importer. Every source reopened by a validator must be explicitly hashed.
+Older receipts without provenance retain `scope_origin="unspecified"`; their
+historical fingerprint timing is not retroactively asserted.
+
+```text
+query_capabilities(product="fluent", kind="workflow", component="fluent_channel")
+query_capabilities(product="cfx", kind="workflow", component="cfx_short_restart")
+```
+
+Queries revalidate hashes, numerical conditions and index/source identity; they
+return scope, checks and metrics. Missing/changed evidence becomes unavailable.
+CFD receipts currently grant **workflow-only** evidence and never promote API
+catalog entries. CFX short-restart evidence explicitly excludes shedding
+frequency, mean-force regression, mesh and time-step independence.
+
 ## 中文说明
 
 诊断入口只启动普通 Python，不启动 Ansys。2026-10-28 的对照证明，本机普通令牌下
@@ -112,3 +158,7 @@ WMI 创建进程被拒，正常提权后的会话可以创建，并通过后台�
 产物，并核对 SHA-256、安装范围和固定数值条件。它不重新求解，也不冒充对全部原生
 场数据进行了独立读取。旧报告没有实际 API 调用清单时，只登记工作流级证据。
 可通过 `query_capabilities(kind="workflow")` 查询；产物变更或丢失后不继续显示为已验证。
+
+Fluent/CFX 已接入同一机制，分别限于二维稳态通道和短续算。历史回执明确标记为事后复核，
+安装指纹在导入时采集，不伪造原始运行时记录。只登记工作流，不批量提升 API 或产品模型的
+完成等级。CFX 短续算不能替代完整脱涡回归；导入只读原始材料，不启动任何产品。

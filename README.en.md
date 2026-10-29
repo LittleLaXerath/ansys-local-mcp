@@ -217,6 +217,11 @@ returns `PhysicsStatus`; it does not create a mesh or solve. See
 
 ## PyFluent
 
+Retained Fluent/CFX numerical checks can be registered as hash-bound workflow
+receipts and queried with `query_capabilities(product="fluent", kind="workflow")`
+or `product="cfx"`. Queries revalidate original evidence; historical rechecks
+are explicitly labeled and do not promote the API inventory. See [receipts](docs/operations.md#cfd-workflow-receipts).
+
 `pyfluent` supports compatible `mode=batch` and managed `mode=persistent`.
 Persistent sessions support new/reuse/summary/close across MCP connections,
 generation checks, native monitors/events and transcript logs. Launch fields
