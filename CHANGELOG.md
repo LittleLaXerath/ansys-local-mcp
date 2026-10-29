@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Adds managed Fluent sessions through the existing authenticated worker,
+  strict launch/runtime contracts, generation checks and original-request
+  observation without automatic replay. Adds native monitor/event/transcript
+  logs, JSON/protobuf/array result conversion and generic return selection.
+- Adds the sixth schema resource (`pyfluent-recipe`) and offline Fluent/CFX
+  capability inventories. Keeps 17 tools and 10 workflow step types.
+- Adds an optional `[fluent]` client environment and an explicitly opt-in
+  isolated channel/session acceptance runner; no CI product launches.
+- Records a real 4-process Fluent channel benchmark with independent Poiseuille
+  comparison, native fields/physics readback, cross-client reuse, save/reopen
+  equality and confirmed shutdown. Earlier failed probes are retained.
+- Corrects passed-test accounting when one test has multiple failure records.
 - Adds a versioned `cfx` workflow step for one `cfx5pre`/`cfx5solve`/`cfx5post`
   operation per step, with an `ansys://schema/cfx-recipe` resource. The MCP tool
   count stays at 17 and the step count becomes 10.

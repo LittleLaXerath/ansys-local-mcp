@@ -185,11 +185,14 @@ class ElevatedSession:
             raise ElevationError(str(response)) from response
         return response
 
-    def request(self, operation: str, payload: dict[str, Any], timeout_seconds: float = 120) -> dict[str, Any]:
+    def request(self, operation: str, payload: dict[str, Any], timeout_seconds: float = 120,
+                *, request_id: str | None = None) -> dict[str, Any]:
         token = current_cancellation_token()
         if token:
             token.raise_if_cancelled()
-        request_id = uuid.uuid4().hex
+        request_id = request_id or uuid.uuid4().hex
+        if not re.fullmatch(r"[a-f0-9]{32}", request_id):
+            raise ValueError("Invalid execution request identity.")
         try:
             acknowledgement = self._exchange({"command": "execute", "request_id": request_id, "operation": operation, "payload": payload})
         except Exception as exc:

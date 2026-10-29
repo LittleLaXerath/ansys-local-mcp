@@ -7,6 +7,57 @@ from pathlib import Path
 from typing import Any
 
 
+def validate_fluent_channel(fields: dict[str, list[float]], reopened: dict[str, list[float]],
+                            mass_in: float, mass_out: float, *, length: float = 0.2,
+                            height: float = 0.01, mean_velocity: float = 0.1,
+                            viscosity: float = 0.001) -> dict[str, Any]:
+    """Compare a developed planar channel with Poiseuille's independent solution.
+
+    Use the middle fifth for velocity, and middle half for the pressure fit,
+    excluding inlet/outlet effects. All geometry and material values are SI.
+    """
+    checks: dict[str, bool] = {}
+    metrics: dict[str, float] = {}
+    try:
+        parameters = (length, height, mean_velocity, viscosity)
+        checks["positive_finite_inputs"] = all(math.isfinite(v) and v > 0 for v in parameters)
+        u, p, centers = fields["u"], fields["p"], fields["centroids"]
+        checks["field_shapes"] = len(u) == len(p) > 0 and len(centers) == 2 * len(u)
+        checks["finite_fields"] = all(math.isfinite(v) for values in (u, p, centers) for v in values)
+        checks["finite_mass_flows"] = math.isfinite(mass_in) and math.isfinite(mass_out) and abs(mass_in) > 0
+        if not all(checks.values()):
+            return {"passed": False, "checks": checks, "metrics": metrics}
+        xy = list(zip(centers[::2], centers[1::2]))
+        checks["geometry_bounds"] = all(0 < x < length and 0 < y < height for x, y in xy)
+        profile = [(u[i], 6 * mean_velocity * (y / height) * (1 - y / height))
+                   for i, (x, y) in enumerate(xy) if 0.4 * length < x < 0.6 * length]
+        pressure = [(x, p[i]) for i, (x, _) in enumerate(xy) if 0.25 * length < x < 0.75 * length]
+        checks["interior_samples"] = len(profile) >= 10 and len(pressure) >= 10
+        if not checks["interior_samples"]:
+            return {"passed": False, "checks": checks, "metrics": metrics}
+        metrics["velocity_profile_relative_l2"] = math.sqrt(sum((v-r)**2 for v, r in profile) / sum(r*r for _, r in profile))
+        metrics["velocity_profile_max_over_peak"] = max(abs(v-r) for v, r in profile) / (1.5 * mean_velocity)
+        xbar = sum(x for x, _ in pressure) / len(pressure)
+        pbar = sum(v for _, v in pressure) / len(pressure)
+        variance = sum((x-xbar)**2 for x, _ in pressure)
+        checks["pressure_fit_extent"] = variance > 0
+        if not variance:
+            return {"passed": False, "checks": checks, "metrics": metrics}
+        gradient = sum((x-xbar)*(v-pbar) for x, v in pressure) / variance
+        reference = -12 * viscosity * mean_velocity / height**2
+        metrics.update(pressure_gradient_pa_per_m=gradient, reference_pressure_gradient_pa_per_m=reference,
+                       pressure_gradient_relative_error=abs(gradient / reference - 1),
+                       relative_mass_imbalance=abs(mass_in+mass_out) / abs(mass_in))
+        checks["velocity_profile"] = max(metrics["velocity_profile_relative_l2"], metrics["velocity_profile_max_over_peak"]) <= 0.02
+        checks["pressure_drop"] = metrics["pressure_gradient_relative_error"] <= 0.03
+        checks["mass_balance"] = metrics["relative_mass_imbalance"] <= 0.0001
+        checks["save_reopen_identical"] = all(fields[key] == reopened[key] for key in ("u", "p", "centroids"))
+        return {"passed": all(checks.values()), "checks": checks, "metrics": metrics,
+                "reference": "Steady incompressible fully developed planar Poiseuille flow; unit depth, SI."}
+    except (KeyError, TypeError, ValueError, ZeroDivisionError, OverflowError):
+        return {"passed": False, "checks": {**checks, "valid_field_data": False}, "metrics": metrics}
+
+
 def validate_contact(report: dict[str, Any], parameters: dict[str, Any]) -> dict[str, Any]:
     if any(type(parameters.get(key)) not in (int, float) or not math.isfinite(parameters[key]) or parameters[key] <= 0
            for key in ("width_mm", "height_mm", "pressure_pa")):

@@ -31,7 +31,7 @@ def main() -> None:
         "observed_at": datetime.now(timezone.utc).isoformat(), "ok": result.wasSuccessful(),
         "tests_run": result.testsRun, "failures": len(result.failures), "errors": len(result.errors),
         "affected_tests": sorted(failed_ids), "skipped": [{"test": test.id(), "reason": reason} for test, reason in result.skipped],
-        "passed_tests": result.testsRun - len(failed_ids) - len(result.skipped),
+        "passed_tests": result.testsRun - len(result.failures) - len(result.errors) - len(result.skipped),
         "log_path": str(log), "product_tests_enabled": False, "uac_tests_enabled": False,
     }
     _write_json(output, summary)

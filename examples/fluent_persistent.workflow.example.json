@@ -1,0 +1,27 @@
+{
+  "version": "1",
+  "workdir": ".",
+  "steps": [
+    {
+      "id": "start",
+      "type": "pyfluent",
+      "mode": "persistent",
+      "runtime": "bundled",
+      "launch": {"dimension": 2, "processor_count": 4},
+      "operations": [{"op": "inspect_path", "path": "settings", "store_as": "settings"}]
+    },
+    {
+      "id": "reuse",
+      "type": "pyfluent",
+      "mode": "persistent",
+      "session": {"action": "reuse", "id": "${steps.start.outputs.session.id}"},
+      "operations": [{"op": "inspect_path", "path": "settings.setup", "store_as": "setup"}]
+    },
+    {
+      "id": "close",
+      "type": "pyfluent",
+      "mode": "persistent",
+      "session": {"action": "close", "id": "${steps.start.outputs.session.id}"}
+    }
+  ]
+}

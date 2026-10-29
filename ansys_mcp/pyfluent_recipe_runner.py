@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import ast
 import json
 import re
 import sys
@@ -29,7 +30,7 @@ def main() -> int:
         raise ValueError("Recipe must be a JSON object.")
 
     pyfluent_core = known_paths()["pyfluent_core"]
-    if str(pyfluent_core) not in sys.path:
+    if recipe.get("runtime", "bundled") == "bundled" and str(pyfluent_core) not in sys.path:
         sys.path.insert(0, str(pyfluent_core))
 
     try:
@@ -94,7 +95,8 @@ def main() -> int:
 
 
 def _launch_kwargs(recipe: dict[str, Any]) -> dict[str, Any]:
-    launch = dict(recipe.get("launch", {}))
+    raw = recipe.get("launch", {})
+    launch = raw.model_dump(exclude_none=True) if hasattr(raw, "model_dump") else dict(raw)
     cwd = launch.get("cwd") or recipe.get("workdir")
     if cwd:
         launch["cwd"] = str(safe_workdir(cwd, Path.cwd()))
@@ -102,6 +104,10 @@ def _launch_kwargs(recipe: dict[str, Any]) -> dict[str, Any]:
     launch.setdefault("precision", "double")
     launch.setdefault("processor_count", 2)
     launch.setdefault("start_transcript", True)
+    from ansys_mcp.config import merge_local_no_proxy
+    import os
+    launch.setdefault("env", merge_local_no_proxy(os.environ))
+    launch.setdefault("fluent_path", str(known_paths()["fluent"]))
     return launch
 
 
@@ -169,10 +175,12 @@ def _run_operation(solver: Any, operation: dict[str, Any]) -> Any:
         return _set_constant(target, operation.get("value"))
     if op == "call":
         target = _resolve_any(solver, operation["path"])
-        return target(*(operation.get("args") or []), **(operation.get("kwargs") or {}))
+        value = target(*(operation.get("args") or []), **(operation.get("kwargs") or {}))
+        return _resolve_any(value, operation["select"]) if operation.get("select") else value
     if op == "tui":
         target = _resolve_any(solver.tui, operation["path"])
-        return target(*(operation.get("args") or []), **(operation.get("kwargs") or {}))
+        value = target(*(operation.get("args") or []), **(operation.get("kwargs") or {}))
+        return _resolve_any(value, operation["select"]) if operation.get("select") else value
     if op == "iterate":
         return solver.settings.solution.run_calculation.iterate(iter_count=int(operation["iterations"]))
     if op == "calculate":
@@ -204,6 +212,10 @@ def _run_operation(solver: Any, operation: dict[str, Any]) -> Any:
             data["state"] = target.get_state()
         with contextlib.suppress(Exception):
             data["active_commands"] = target.get_active_command_names()
+        for name in ("is_active", "is_read_only", "allowed_values"):
+            with contextlib.suppress(Exception):
+                member = getattr(target, name)
+                data[name] = member() if callable(member) else member
         return data
 
     raise ValueError(f"Unsupported operation: {op}")
@@ -252,7 +264,7 @@ def _path_tokens(path: str) -> list[tuple[str, Any]]:
                 if raw[0] == '"':
                     value = json.loads(raw)
                 else:
-                    value = bytes(raw[1:-1], "utf-8").decode("unicode_escape")
+                    value = ast.literal_eval(raw)
             elif re.fullmatch(r"-?\d+", raw):
                 value = int(raw)
             else:

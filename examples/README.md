@@ -12,6 +12,9 @@ use fresh generated projects; measured support is listed in
 默认测试使用模拟产品对象和普通工作进程；真实产品验收单独显式运行，采用新生成的隔离工程。
 已测范围见[验收记录](../docs/validation.md)。Schema 通过不等于建模、网格或求解成功。
 
+[Fluent 持久会话示例](fluent_persistent.workflow.example.json) 演示创建、跨 step 复用和显式关闭；
+真实执行会启动 Fluent，检查格式时请使用 `validation_mode="schema"`。
+
 Set allowed roots to include the examples and inputs. A workflow file's relative
 workdir is resolved from its directory. Other server-managed paths are relative
 to that workdir. JSON variables are not substituted inside external scripts.

@@ -566,11 +566,14 @@ def query_capabilities(product: str = "mechanical", version: str | None = None, 
     product = product.casefold()
     if kind not in {"api", "workflow"}:
         raise ValueError("Capability kind must be api or workflow.")
-    if product not in {"mechanical", "dpf"}:
-        raise ValueError("Product must be mechanical or dpf.")
+    if product not in {"mechanical", "dpf", "fluent", "cfx"}:
+        raise ValueError("Product must be mechanical, dpf, fluent or cfx.")
     if kind == "workflow":
         from .acceptance_evidence import query_workflow_evidence
         return query_workflow_evidence(product, _version(version), component, status, offset, limit)
+    if product in {"fluent", "cfx"}:
+        from .cfd_catalog import query_cfd_catalog
+        return query_cfd_catalog(product, _version(version), component, status, offset, limit)
     if product == "dpf":
         from .dpf import dpf_runtime_info
         records = dpf_runtime_info()["formats"]

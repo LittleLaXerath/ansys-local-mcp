@@ -217,6 +217,15 @@ returns `PhysicsStatus`; it does not create a mesh or solve. See
 
 ## PyFluent
 
+`pyfluent` supports compatible `mode=batch` and managed `mode=persistent`.
+Persistent sessions support new/reuse/summary/close across MCP connections,
+generation checks, native monitors/events and transcript logs. Launch fields
+are strict; automatic replay is rejected. See [Fluent sessions](docs/fluent.md)
+and the [persistent workflow](examples/fluent_persistent.workflow.example.json).
+Read `ansys://schema/pyfluent-recipe` for the sixth schema resource. Install the
+optional client runtime with `pip install -e ".[fluent]"` and explicitly select
+`runtime=client`; `bundled` never silently falls back to it.
+
 Supported primitives:
 
 - `read`, `write`

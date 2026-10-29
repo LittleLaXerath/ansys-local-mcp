@@ -4,6 +4,7 @@ import copy
 import json
 import re
 import shutil
+import sys
 import time
 import uuid
 from importlib import metadata
@@ -144,6 +145,7 @@ def inspect_runtime(include_schema: bool = False) -> dict[str, Any]:
                 "mechanical_recipe": "ansys://schema/mechanical-recipe",
                 "dpf_recipe": "ansys://schema/dpf-recipe",
                 "cfx_recipe": "ansys://schema/cfx-recipe",
+                "pyfluent_recipe": "ansys://schema/pyfluent-recipe",
             },
         },
         "pyfluent_core": {
@@ -162,16 +164,26 @@ def inspect_runtime(include_schema: bool = False) -> dict[str, Any]:
     result["capability_evidence"] = capability_evidence_status(installation.version_tag)
     from .mechanical import session_summary
     result["mechanical_sessions"] = session_summary()
+    from .fluent_session import session_summary as fluent_session_summary
+    result["fluent_sessions"] = fluent_session_summary()
+    bundled_versions = {item.metadata["Name"]: item.version for item in metadata.distributions(path=[str(paths["pyfluent_core"])])
+                        if item.metadata["Name"] == "ansys-fluent-core"}
+    result["pyfluent_core"].update(bundled_versions=bundled_versions,
+                                  persistent_python=sys.executable,
+                                  batch_bundled_python=str(paths["ansys_python"]),
+                                  runtime_policy="Explicit bundled/client selection; no automatic fallback.")
     if include_schema:
         from .mechanical_schema import MechanicalRecipe
         from .dpf_schema import DPFRecipe
         from .cfx_schema import CFXRecipe
+        from .schemas import PyFluentRecipe
         result["schemas"] = {
             "workflow": WorkflowModel.model_json_schema(),
             "workbench_recipe": WorkbenchRecipe.model_json_schema(),
             "mechanical_recipe": MechanicalRecipe.model_json_schema(),
             "dpf_recipe": DPFRecipe.model_json_schema(),
             "cfx_recipe": CFXRecipe.model_json_schema(),
+            "pyfluent_recipe": PyFluentRecipe.model_json_schema(),
         }
     return result
 
@@ -404,7 +416,7 @@ def legacy_pyfluent_workflow(
             {
                 "id": "pyfluent_recipe",
                 "type": "pyfluent",
-                "launch": payload.get("launch", {}),
+                **{key: payload[key] for key in ("mode", "runtime", "session", "launch", "monitoring") if key in payload},
                 "read": payload.get("read"),
                 "operations": payload.get("operations", []),
                 "write": payload.get("write"),
@@ -581,8 +593,14 @@ def _validate_pyfluent_step(
     validation_mode: Literal["runtime", "schema"],
     checks: PathChecks,
 ) -> list[dict[str, Any]]:
-    if validation_mode == "runtime" and not known_paths()["pyfluent_core"].is_dir():
-        raise WorkflowProblem(ERROR_PYFLUENT_IMPORT, f"PyFluent core path not found: {known_paths()['pyfluent_core']}", step_id)
+    if step.retry.max_attempts != 1:
+        raise WorkflowProblem(ERROR_VALIDATION, "Fluent operations must not be automatically replayed; observe the original request.", step_id)
+    if validation_mode == "runtime" and step.session.action == "new":
+        from .fluent_session import validate_runtime, FluentError
+        try:
+            validate_runtime(step.runtime)
+        except FluentError as exc:
+            raise WorkflowProblem(exc.code, str(exc), step_id) from exc
     diagnostics: list[dict[str, Any]] = []
     read = step.read
     if isinstance(read, str):
@@ -595,8 +613,9 @@ def _validate_pyfluent_step(
     if step.write:
         for value in step.write.model_dump(exclude_none=True).values():
             checks.resolve(str(value))
-    if "cwd" in step.launch:
-        checks.resolve(str(step.launch["cwd"]), expect_file=False)
+    if step.launch.cwd:
+        checks.resolve(step.launch.cwd, expect_file=False)
+    # Generic calls may contain file_name/path keyword arguments too.
     for operation in step.operations:
         data = operation.model_dump(exclude_none=True)
         normalized, warning = normalize_operation(data)
@@ -610,7 +629,24 @@ def _validate_pyfluent_step(
             for key in ("case", "case_data"):
                 if normalized.get(key):
                     checks.resolve(str(normalized[key]))
+        if normalized["op"] in {"call", "tui", "set_state", "create"}:
+            for value in _fluent_path_arguments(normalized):
+                checks.resolve(value)
     return diagnostics
+
+
+def _fluent_path_arguments(value: Any) -> list[str]:
+    paths: list[str] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if isinstance(child, str) and key in {"file_name", "filename", "file_path", "script_path", "path_name"}:
+                paths.append(child)
+            elif key not in {"path", "op"}:
+                paths.extend(_fluent_path_arguments(child))
+    elif isinstance(value, list):
+        for child in value:
+            paths.extend(_fluent_path_arguments(child))
+    return paths
 
 
 def _validate_workbench_step(
@@ -837,23 +873,28 @@ def _run_pyfluent_step(
     attempt: int,
     started: float,
 ) -> dict[str, Any]:
+    from .fluent_session import prepare_recipe, run_persistent
+    from .schemas import PyFluentRecipe
+    fields = step.model_dump(exclude={"type", "id", "continue_on_error", "timeout_seconds", "retry", "produces"})
+    if "launch" not in step.model_fields_set and step.session.action != "new":
+        fields.pop("launch", None)
+    model = PyFluentRecipe.model_validate(fields)
+    if step.mode == "persistent":
+        domain = run_persistent(model, workdir=cwd, run_dir=run_dir, timeout_seconds=timeout_seconds)
+        result = _ok_step(step_id, step.type, started, {})
+        result.update(domain, elapsed_s=round(time.monotonic() - started, 3))
+        return result
     operations: list[dict[str, Any]] = []
     for operation in step.operations:
         normalized, _ = normalize_operation(operation.model_dump(exclude_none=True))
         operations.append(normalized)
     result_file = run_dir / f"{step_id}.attempt-{attempt}.pyfluent-result.json"
-    payload = {
-        "launch": step.launch,
-        "read": step.read if isinstance(step.read, str) else (step.read.model_dump(exclude_none=True) if step.read else None),
-        "operations": operations,
-        "write": step.write.model_dump(exclude_none=True) if step.write else None,
-        "workdir": str(cwd),
-        "result_path": str(result_file),
-    }
+    payload = prepare_recipe(model, cwd)
+    payload.update(operations=operations, result_path=str(result_file))
     recipe_file = run_dir / f"{step_id}.attempt-{attempt}.pyfluent.json"
     recipe_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     runner = Path(__file__).with_name("pyfluent_recipe_runner.py")
-    argv = [str(ansys_python_executable()), str(runner), str(recipe_file)]
+    argv = [str(ansys_python_executable()) if step.runtime == "bundled" else sys.executable, str(runner), str(recipe_file)]
     process = run_process(
         argv,
         cwd=cwd,
@@ -985,6 +1026,8 @@ def _resolve_step(
     cwd: Path,
 ) -> BaseWorkflowStep:
     payload = _resolve_runtime_references(step.model_dump(mode="python"), results, step_id)
+    if isinstance(step, PyFluentStep) and step.session.action != "new" and "launch" not in step.model_fields_set:
+        payload.pop("launch", None)
     if isinstance(step, WorkbenchStep) and payload.get("recipe_path"):
         recipe = load_workbench_recipe(recipe=None, recipe_path=payload["recipe_path"], workdir=cwd)
         payload["recipe"] = _resolve_runtime_references(recipe.model_dump(mode="python"), results, step_id)

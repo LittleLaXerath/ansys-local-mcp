@@ -65,19 +65,21 @@ no automatic elevation, permission-policy change or lifetime-bound fallback was 
 - **Residual**: historical records keep their original fingerprint and are not
   re-scoped automatically.
 
-## K-05 · Fluent has no persistent session or product validation — `pending` (P3)
+## K-05 · Fluent persistent sessions and product validation — `in progress` (P3)
 
-- Each `pyfluent` step launches a solver and exits; there is no reuse,
-  generation invalidation, or monitoring (transcript is started but not read).
-- No Fluent product acceptance exists in this repository's measured evidence.
-- Planned in the handoff plan: persistent sessions, strict launch schema, TUI
-  discovery, and a small laminar-channel benchmark.
+- Managed persistent actors, strict launch schema, generation checks, monitoring
+  and offline declarations are implemented. The batch default remains compatible.
+- Real Fluent 2026 R1 launch and recovery through a second MCP connection were
+  observed. Full channel numerical acceptance is recorded separately, not inferred.
+- Bundled client packages may have missing or incompatible dependencies in the
+  server Python environment. Use an explicitly configured optional client runtime;
+  there is no automatic switch after execution fails. See [fluent.md](fluent.md).
 
-## K-06 · CFX has no structured recipe — `pending` (P2)
+## K-06 · CFX structured recipe — `implemented`; full regression `pending` (P2)
 
-- CFX is reachable through `command` steps and the Workbench CCL channel only;
-  there is no `cfx` step, no incremental solver-log monitoring and no
-  post-processing recipe.
+- The `cfx` step implements pre/solve/post and incremental monitoring, alongside
+  command and Workbench channels. Short restart acceptance passed. Full Re100
+  shedding regression and the historical stall investigation remain pending.
 - RMS targets belong to preprocessing physics settings, not to solver CLI flags.
 
 ## K-07 · Mechanical catalog coverage far exceeds measured evidence — `pending` (P4)

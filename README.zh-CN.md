@@ -165,6 +165,12 @@ Actions：`get_template`、`create_system`、`get_system`、`get_component`、`g
 
 ## PyFluent
 
+`pyfluent` 保留默认 `mode=batch`，并支持 `mode=persistent` 的创建、复用、查询、关闭，
+可跨 MCP 连接恢复；提供代际检查、原生监控/事件与 transcript 日志。启动字段严格验证，
+禁止自动重放。详见[Fluent 会话说明](docs/fluent.md)和[持久工作流](examples/fluent_persistent.workflow.example.json)。
+第六个 Schema 资源为 `ansys://schema/pyfluent-recipe`。可选客户端依赖使用
+`pip install -e ".[fluent]"` 安装，再显式选择 `runtime=client`；bundled 不会自动切换到它。
+
 支持的通用 primitives：
 
 - `read`、`write`

@@ -7,6 +7,13 @@ are retained only in the local ignored run directory.
 
 ## Baseline
 
+P3 follow-up (2026-10-29): managed Fluent was recovered by a second stdio MCP
+server, solved a new 2D laminar channel, saved/reopened native case/data and
+closed its owned processes. Poiseuille comparison: profile relative L2 0.103454%,
+pressure-gradient error 0.220579%, mass imbalance 0.000130344%; saved/reopened
+arrays were identical. The explicit client runtime was PyFluent 0.37.1; bundled
+and earlier recipe failures remain retained as failures. See [Fluent](fluent.md).
+
 P1 follow-up (2026-10-28): the medium-session WMI creation denial was compared
 with the same minimal command in a normally elevated session, where it passed.
 The 242-test non-product suite then passed 240 tests with two intentional opt-in

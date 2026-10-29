@@ -10,7 +10,7 @@ from .fluent_recipe import run_ansys_python_script as run_ansys_python_script_im
 from .fluent_recipe import run_pyfluent_recipe as run_pyfluent_recipe_impl
 from .config import known_paths, require_allowed_file
 from .runtime import signature_info
-from .schemas import WorkflowModel, WorkbenchRecipe
+from .schemas import WorkflowModel, WorkbenchRecipe, PyFluentRecipe
 from .mechanical_schema import MechanicalRecipe
 from .dpf_schema import DPFRecipe
 from .cfx_schema import CFXRecipe
@@ -50,6 +50,12 @@ def dpf_recipe_schema() -> str:
 def cfx_recipe_schema() -> str:
     """Versioned CFX pre/solve/post operation with verified completion."""
     return json.dumps(CFXRecipe.model_json_schema(), indent=2)
+
+
+@mcp.resource("ansys://schema/pyfluent-recipe", mime_type="application/schema+json")
+def pyfluent_recipe_schema() -> str:
+    """Strict Fluent launch, managed sessions, monitoring and primitive operations."""
+    return json.dumps(PyFluentRecipe.model_json_schema(), indent=2)
 
 
 @mcp.tool()

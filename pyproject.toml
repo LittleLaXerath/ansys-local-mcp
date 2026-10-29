@@ -36,6 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["build>=1.2,<2"]
+fluent = ["ansys-fluent-core>=0.37.1,<0.38"]
 
 [project.urls]
 Homepage = "https://github.com/LittleLaXerath/ansys-local-mcp"
