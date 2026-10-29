@@ -222,7 +222,9 @@ _private = 1
         with patch.dict(os.environ, {"ANSYS_MCP_EVIDENCE_ROOT": str(custom)}):
             with patch.object(capabilities, "_runtime_scope", return_value=scope):
                 target = capabilities._evidence_file("261", scope["installation_fingerprint"])
-                self.assertEqual(target, custom / "v261" / (scope["installation_fingerprint"] + ".jsonl"))
+                # Windows runner TEMP may use an 8.3 alias; the API canonicalizes it.
+                expected = (custom / "v261" / (scope["installation_fingerprint"] + ".jsonl")).resolve()
+                self.assertEqual(target, expected)
                 status = capabilities.capability_evidence_status("261")
         self.assertTrue(status["ok"], status)
         self.assertTrue(status["configured_by_environment"])
