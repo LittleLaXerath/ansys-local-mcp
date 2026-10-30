@@ -36,7 +36,7 @@ class AcceptanceReceipt(BaseModel):
     case_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     observed_at: datetime
     installation_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
-    validator: Literal["core_beam_scalars", "contact", "parameters", "specialized", "fluent_channel", "cfx_short_restart", "coordinate_equivalence"]
+    validator: Literal["core_beam_scalars", "contact", "parameters", "specialized", "fluent_channel", "cfx_short_restart", "coordinate_equivalence", "transient_sdof"]
     scope_origin: Literal["run", "historical_revalidation", "unspecified"] = "unspecified"
     report: EvidenceFile
     validation: EvidenceFile
@@ -46,8 +46,8 @@ class AcceptanceReceipt(BaseModel):
 
     @model_validator(mode="after")
     def dated(self) -> "AcceptanceReceipt":
-        if self.validator == "coordinate_equivalence" and (self.backend != "workbench" or self.case_id != "coordinate_equivalence"):
-            raise ValueError("Coordinate benchmark receipts currently cover the Workbench coordinate_equivalence case only.")
+        if self.validator in {"coordinate_equivalence","transient_sdof"} and (self.backend != "workbench" or self.case_id != self.validator):
+            raise ValueError("Basic Mechanical benchmark receipts require their matching Workbench case.")
         cfd = {"fluent_channel": ("fluent", "pyfluent"), "cfx_short_restart": ("cfx", "official_cfx")}
         if self.product != "mechanical" or self.validator in cfd:
             if cfd.get(self.validator) != (self.product, self.backend):
@@ -137,12 +137,12 @@ def inspect_receipt(path: Path) -> dict[str, Any]:
             for child in value: finite(child)
     finite(report)
     finite(parameters)
-    if receipt.validator == "coordinate_equivalence":
-        from .mechanical_benchmarks import validate_coordinate_receipt
+    if receipt.validator in {"coordinate_equivalence","transient_sdof"}:
+        from .mechanical_benchmarks import validate_basic_receipt
         try:
-            checked = validate_coordinate_receipt(receipt, report, parameters, resolved, resolved[receipt.parameters.path].parent)
+            checked = validate_basic_receipt(receipt, report, parameters, resolved, resolved[receipt.parameters.path].parent)
         except (KeyError, TypeError, ZeroDivisionError, OverflowError) as exc:
-            raise ValueError("Malformed coordinate evidence: " + str(exc)) from exc
+            raise ValueError("Malformed basic Mechanical evidence: " + str(exc)) from exc
     elif receipt.product == "mechanical":
         checked = _validate(receipt.validator, report, parameters, resolved[receipt.report.path].parent)
     else:

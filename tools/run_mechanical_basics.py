@@ -25,11 +25,117 @@ from ansys_mcp.mechanical_benchmarks import (
     validate_coordinates,
     find_structural_steel,
 )
+from ansys_mcp.transient_benchmark import (
+    validate_transient,
+    transient_curve,
+    find_transient_material,
+)
 from tools._mcp_acceptance import mcp_client, tool_value
 from tools.run_product_acceptance import _wrapper
 
 
-async def execute(directory: Path, geometry: Path, register: bool = False):
+CASE_SPECS = {
+    "coordinate_equivalence": {
+        "script": "mechanical_coordinate_acceptance.py",
+        "template": "Static Structural (ANSYS)",
+        "project": "coordinates.wbpj",
+        "results": ("global", "rotated"),
+        "parameters": {"angle_deg": 30, "origin_m": [0.03, 0.002, -0.001]},
+    },
+    "transient_sdof": {
+        "script": "mechanical_transient_acceptance.py",
+        "template": "Transient Structural (ANSYS)",
+        "project": "transient.wbpj",
+        "results": ("transient",),
+        "parameters": {
+            "mass_kg": 1000.0,
+            "force_n": 100.0,
+            "dt_s": 0.00005,
+            "end_time_s": 0.04,
+            "material_name": "MCP SDOF Linear",
+        },
+    },
+}
+
+
+def material_operations(parameters):
+    def reference(name):
+        return {"$type": "local_ref", "name": name}
+
+    def operation(id, target, member, kwargs, store_as=None):
+        return {
+            "op": "engineering_data",
+            "action": "call",
+            "id": id,
+            "target": target,
+            "member": member,
+            "kwargs": kwargs,
+            **({"store_as": store_as} if store_as else {}),
+        }
+
+    return [
+        operation(
+            "material",
+            "EngineeringData",
+            "CreateMaterial",
+            {"Name": parameters["material_name"]},
+            "sdof_material",
+        ),
+        operation(
+            "density",
+            reference("sdof_material"),
+            "CreateProperty",
+            {"Name": "Density"},
+            "sdof_density",
+        ),
+        operation(
+            "set_density",
+            reference("sdof_density"),
+            "SetData",
+            {
+                "SheetName": "",
+                "Index": 0,
+                "Variables": ["Density"],
+                "Values": [["7850 [kg m^-3]"]],
+            },
+        ),
+        operation(
+            "elastic",
+            reference("sdof_material"),
+            "CreateProperty",
+            {"Name": "Elasticity", "Behavior": "Isotropic"},
+            "sdof_elastic",
+        ),
+        operation(
+            "set_elastic",
+            reference("sdof_elastic"),
+            "SetData",
+            {
+                "SheetName": "",
+                "Index": 0,
+                "Variables": ["Young's Modulus", "Poisson's Ratio"],
+                "Values": [["200000000000 [Pa]"], ["0"]],
+            },
+        ),
+        operation(
+            "elastic_readback",
+            reference("sdof_elastic"),
+            "GetData",
+            {
+                "Variables": ["Young's Modulus", "Poisson's Ratio"],
+                "AsDictionary": False,
+            },
+        ),
+    ]
+
+
+async def execute(
+    directory: Path,
+    geometry: Path,
+    register: bool = False,
+    case: str = "coordinate_equivalence",
+):
+    specification = CASE_SPECS[case]
     started = time.monotonic()
     deadline = started + 1800
     installation = workflow_scope("mechanical", discover_installation().version_tag)
@@ -47,24 +153,26 @@ async def execute(directory: Path, geometry: Path, register: bool = False):
         "length_m": 0.1,
         "width_m": 0.01,
         "height_m": 0.01,
-        "angle_deg": 30,
-        "origin_m": [0.03, 0.002, -0.001],
+        **specification["parameters"],
     }
     _write_json(directory / "parameters.json", parameters)
     source = (
         Path(__file__).resolve().parents[1]
-        / "examples/scripts/mechanical_coordinate_acceptance.py"
+        / "examples/scripts"
+        / specification["script"]
     )
-    snapshot = directory / "coordinate.source.py"
+    stem = "coordinate" if case == "coordinate_equivalence" else case
+    snapshot = directory / (stem + ".source.py")
     shutil.copyfile(source, snapshot)
-    script = _wrapper(snapshot, parameters, directory / "coordinate.py")
+    script = _wrapper(snapshot, parameters, directory / (stem + ".py"))
     model_recipe = {
         "backend": "workbench",
         "mode": "persistent",
         "launch": {"elevation": "never"},
         "project": {
             "geometry_path": str(destination),
-            "save_path": str(directory / "coordinates.wbpj"),
+            "save_path": str(directory / specification["project"]),
+            "template_name": specification["template"],
         },
         "operations": [
             {
@@ -72,6 +180,7 @@ async def execute(directory: Path, geometry: Path, register: bool = False):
                 "op": "project_save",
                 "path": str(directory / "preflight.wbpj"),
             },
+            *(material_operations(parameters) if case == "transient_sdof" else []),
             {"id": "benchmark", "op": "script", "script_path": str(script)},
         ],
     }
@@ -157,7 +266,7 @@ async def execute(directory: Path, geometry: Path, register: bool = False):
             report = model["steps"][0]["outputs"]["values"]["benchmark"]
             _write_json(directory / "report.json", report)
             steps = []
-            for name in ("global", "rotated"):
+            for name in specification["results"]:
                 steps.append(
                     {
                         "id": name,
@@ -171,8 +280,21 @@ async def execute(directory: Path, geometry: Path, register: bool = False):
                                     "op": "result",
                                     "id": "u",
                                     "name": "displacement",
-                                    "time_scoping": 1,
+                                    "time_scoping": list(
+                                        range(
+                                            1,
+                                            len(report["cases"]["transient"]["times_s"])
+                                            + 1,
+                                        )
+                                    )
+                                    if case == "transient_sdof"
+                                    else 1,
                                     "requested_location": "Nodal",
+                                    **(
+                                        {"mesh_scoping": report["tip_node_ids"]}
+                                        if case == "transient_sdof"
+                                        else {}
+                                    ),
                                 },
                                 {
                                     "op": "export",
@@ -185,20 +307,34 @@ async def execute(directory: Path, geometry: Path, register: bool = False):
                     }
                 )
             await run("02-fields", steps)
-            properties, material_file = find_structural_steel(directory)
+            properties, material_file = (
+                find_transient_material(directory, parameters["material_name"])
+                if case == "transient_sdof"
+                else find_structural_steel(directory)
+            )
             _write_json(directory / "material-properties.json", properties)
             parameters.update(properties)
             parameters["sources"] = {
                 "material": str(material_file),
-                "global_field": str(directory / "global.csv"),
-                "rotated_field": str(directory / "rotated.csv"),
+                **{
+                    name + "_field": str(directory / (name + ".csv"))
+                    for name in specification["results"]
+                },
             }
             _write_json(directory / "validation-parameters.json", parameters)
-            validation = validate_coordinates(
-                report,
-                parameters,
-                nodal_vectors(directory / "global.csv"),
-                nodal_vectors(directory / "rotated.csv"),
+            validation = (
+                validate_transient(
+                    report,
+                    parameters,
+                    transient_curve(directory / "transient.csv", report),
+                )
+                if case == "transient_sdof"
+                else validate_coordinates(
+                    report,
+                    parameters,
+                    nodal_vectors(directory / "global.csv"),
+                    nodal_vectors(directory / "rotated.csv"),
+                )
             )
             validation["source_geometry_unchanged"] = (
                 file_sha256(geometry) == source_hash
@@ -257,7 +393,7 @@ async def execute(directory: Path, geometry: Path, register: bool = False):
                 "script": str(snapshot),
                 **{
                     name + "_result": str(directory / (name + ".rst"))
-                    for name in ("global", "rotated")
+                    for name in specification["results"]
                 },
             }
         )
@@ -273,8 +409,8 @@ async def execute(directory: Path, geometry: Path, register: bool = False):
             "product": "mechanical",
             "backend": "workbench",
             "product_version": model_step["outputs"]["session"]["version"],
-            "validator": "coordinate_equivalence",
-            "case_id": "coordinate_equivalence",
+            "validator": case,
+            "case_id": case,
             "run_id": results["01-model"]["run_id"],
             "scope_origin": "run",
             "observed_at": datetime.now(timezone.utc).isoformat(),
@@ -305,6 +441,9 @@ def main():
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument(
+        "--case", choices=tuple(CASE_SPECS), default="coordinate_equivalence"
+    )
+    parser.add_argument(
         "--register-evidence",
         action="store_true",
         help="Import the independently rechecked receipt after confirmed shutdown",
@@ -319,7 +458,11 @@ def main():
         args.output or Path.cwd() / ".ansys_mcp/mechanical_basics" / uuid.uuid4().hex
     )
     directory.mkdir(parents=True, exist_ok=False)
-    return 0 if asyncio.run(execute(directory, source, args.register_evidence)) else 1
+    return (
+        0
+        if asyncio.run(execute(directory, source, args.register_evidence, args.case))
+        else 1
+    )
 
 
 if __name__ == "__main__":

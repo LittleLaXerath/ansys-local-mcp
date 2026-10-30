@@ -9,7 +9,7 @@ It does **not** claim coverage of every Mechanical analysis or extension.
 | Planned case | Product/numerical gate |
 | --- | --- |
 | Coordinate systems and named selections | Passed on the documented v261 benchmark |
-| Transient structural | Pending |
+| Transient structural | Passed for the documented undamped mass-dominated axial benchmark |
 | Harmonic response | Pending |
 | Response spectrum | Pending |
 | Random vibration | Pending |
@@ -78,7 +78,58 @@ This tests coordinate/load equivalence on one linear isotropic static model,
 not mesh independence, nonlinear behavior, all coordinate types or other
 analysis categories. Runtime and numerical gates for pending cases stay pending.
 
-## Receipts
+## Transient Structural Benchmark
+
+```powershell
+python -m tools.run_mechanical_basics --case transient_sdof --execute --geometry-path path/to/benchmark-beam.step --output path/to/new-transient-run --register-evidence
+```
+
+The same runner now selects cases from a registry; the default remains the
+coordinate benchmark. No new MCP tool, workflow step or runtime dependency is
+added. The transient workflow uses the existing Engineering Data bridge to
+create a project-local linear material: E=200 GPa, density 7,850 kg/m³ and
+Poisson's ratio 0. That ratio removes lateral-constraint stiffening from the
+independent axial-spring reference; no global material library is modified.
+
+A native Mechanical PointMass of 1,000 kg is rigidly attached at the beam tip.
+The 100 x 10 x 10 mm beam supplies axial stiffness k=EA/L=2e8 N/m. Its own
+0.0785 kg mass is only 7.85e-5 of the point mass, so the comparison is explicitly
+a **mass-dominated FE approximation** to an SDOF oscillator, not an assertion
+that the entire finite-element model has only one degree of freedom.
+
+The fresh Transient Structural model has nominally zero initial displacement
+and velocity and receives a constant axial 100 N step. For the independent
+undamped reference, u(t)=F/k*[1-cos(sqrt(k/m)*t)]. The run uses 4 SMP cores,
+no large deflection, zero Rayleigh/numerical damping, a fixed 5e-5 s time step,
+and 0.04 s end time. The runner reads back all these controls, point/body mass,
+tip position, force table, geometry and saved material XML. Native controls
+follow the public [transient-analysis interface](https://ansyshelp.ansys.com/public/Views/Secured/corp/v251/en/act_script/act_script_demo_trans_struct.html).
+
+All 800 native result sets are exported through the existing DPF step, scoped
+to the actual tip node IDs. Time-set labels, native result times, complete node
+coverage and metre units must agree. Validation checks the complete signed
+time response, oscillation/period, axial uniformity, small transverse motion
+and the final Mechanical displacement. A static result, matching peak with
+wrong phase, missing time sets, changed damping or modified original export
+cannot grant a verified receipt. The material parser trims whitespace around
+XML units but still rejects non-SI physical units; an empty unit is allowed
+only for the dimensionless Poisson ratio.
+
+Measured 2026-10-30: time-response relative L2 error **0.544548%**, maximum
+error/analytical peak **0.503675%** (both <=5%); measured period 0.014050 s versus
+0.014049629462 s analytical (<=2% tolerance). All 800 samples, geometry hashes,
+project save, independent revalidation and confirmed shutdown passed. The
+earlier material-format failure remains unchanged in its own run directory.
+
+```text
+query_capabilities(product="mechanical", version="261", kind="workflow", component="transient_sdof")
+```
+
+This does not validate damping, nonlinear contact, arbitrary load histories,
+initial-velocity workflows, mesh/time-step independence or every transient
+element type. The other seven planned basic analysis cases remain pending.
+
+## Receipt Integrity
 
 Successful runs prepare an existing-format private acceptance receipt;
 `--register-evidence` explicitly imports it after independent checks. It binds
@@ -91,12 +142,12 @@ artifacts or missing sources instead of retaining a false verified status.
 query_capabilities(product="mechanical", version="261", kind="workflow", component="coordinate_equivalence")
 ```
 
-Only the four explicitly recorded coordinate/selection API names receive
-receipt-derived evidence; no other analysis API is inferred from this model.
+Only API names explicitly recorded by each product script receive receipt-derived
+evidence; no other analysis API is inferred from these benchmarks.
 
 ## 中文说明
 
-本轮通过的是“坐标系与命名选择”这一项：新建工程、先后两次静力求解、原生结果逐节点
-比较、反力/单位/几何/材料读回和关闭确认。不是 P4 全部完成。上表其余八项仍待真实
-验收，不能以已有 API 目录或本项通过替代。工程、原生结果、失败记录和完整报告仅保留
+目前通过“坐标系与命名选择”和“集中质量主导的轴向瞬态响应”两项，均有新工程、
+原生结果比较、单位/几何/材料读回、关闭确认与回执。不是 P4 全部完成。其余七项仍待真实
+验收，不能以已有 API 目录或这两项通过替代。工程、原生结果、失败记录和完整报告仅保留
 在忽略的私有目录，不进入 GitHub 仓库。

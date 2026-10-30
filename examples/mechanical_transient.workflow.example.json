@@ -1,0 +1,22 @@
+{
+  "version": "1",
+  "workdir": ".",
+  "variables": {"geometry_path": "beam.step", "transient_script": "transient_sdof.py"},
+  "steps": [{
+    "id": "transient",
+    "type": "mechanical",
+    "recipe": {
+      "backend": "workbench",
+      "mode": "batch",
+      "project": {"geometry_path": "${geometry_path}", "template_name": "Transient Structural (ANSYS)", "save_path": "transient.wbpj"},
+      "operations": [
+        {"id": "material", "op": "engineering_data", "action": "call", "target": "EngineeringData", "member": "CreateMaterial", "kwargs": {"Name": "MCP SDOF Linear"}, "store_as": "sdof_material"},
+        {"id": "density", "op": "engineering_data", "action": "call", "target": {"$type": "local_ref", "name": "sdof_material"}, "member": "CreateProperty", "kwargs": {"Name": "Density"}, "store_as": "sdof_density"},
+        {"id": "set_density", "op": "engineering_data", "action": "call", "target": {"$type": "local_ref", "name": "sdof_density"}, "member": "SetData", "kwargs": {"SheetName": "", "Index": 0, "Variables": ["Density"], "Values": [["7850 [kg m^-3]"]]}},
+        {"id": "elastic", "op": "engineering_data", "action": "call", "target": {"$type": "local_ref", "name": "sdof_material"}, "member": "CreateProperty", "kwargs": {"Name": "Elasticity", "Behavior": "Isotropic"}, "store_as": "sdof_elastic"},
+        {"id": "set_elastic", "op": "engineering_data", "action": "call", "target": {"$type": "local_ref", "name": "sdof_elastic"}, "member": "SetData", "kwargs": {"SheetName": "", "Index": 0, "Variables": ["Young's Modulus", "Poisson's Ratio"], "Values": [["200000000000 [Pa]"], ["0"]]}},
+        {"id": "benchmark", "op": "script", "script_path": "${transient_script}"}
+      ]
+    }
+  }]
+}

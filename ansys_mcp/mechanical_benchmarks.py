@@ -14,7 +14,13 @@ class MissingMaterialProperties(ValueError):
     pass
 
 
-def structural_steel_properties(source: Path) -> dict[str, float]:
+def material_constants(
+    source: Path,
+    material_name: str,
+    expected: dict,
+    *,
+    allow_zero: tuple[str, ...] = (),
+) -> dict[str, float]:
     try:
         document = ET.parse(source).getroot()
     except ET.ParseError as exc:
@@ -22,14 +28,9 @@ def structural_steel_properties(source: Path) -> dict[str, float]:
     details = {
         node.attrib["id"]: node for node in document.findall(".//ParameterDetails")
     }
-    expected = {
-        "Young's Modulus": ("young_pa", {"Pa"}),
-        "Density": ("density_kg_m3", {"kg m^-3"}),
-        "Thermal Conductivity": ("conductivity_w_mk", {"W m^-1 C^-1", "W m^-1 K^-1"}),
-    }
     for material in document.findall(".//Material"):
         bulk = material.find("BulkDetails")
-        if bulk is None or bulk.findtext("Name") != "Structural Steel":
+        if bulk is None or bulk.findtext("Name") != material_name:
             continue
         values = {}
         for parameter in bulk.findall(".//ParameterValue"):
@@ -44,7 +45,7 @@ def structural_steel_properties(source: Path) -> dict[str, float]:
                     if node.get("name") == "Units"
                 ),
                 "",
-            )
+            ).strip()
             if not unit:
                 unit = " ".join(
                     (node.findtext("Name") or "")
@@ -60,15 +61,34 @@ def structural_steel_properties(source: Path) -> dict[str, float]:
                     "Material property must use the benchmark SI unit: " + name
                 )
             value = float(parameter.findtext("Data", ""))
-            if not math.isfinite(value) or value <= 0:
+            if (
+                not math.isfinite(value)
+                or value < 0
+                or (value == 0 and expected[name][0] not in allow_zero)
+            ):
                 raise ValueError(
                     "Material properties must be finite positive constants."
                 )
             values[expected[name][0]] = value
-        if len(values) == 3:
+        if len(values) == len(expected):
             return values
     raise MissingMaterialProperties(
         "Saved Engineering Data does not prove the benchmark material constants."
+    )
+
+
+def structural_steel_properties(source: Path) -> dict[str, float]:
+    return material_constants(
+        source,
+        "Structural Steel",
+        {
+            "Young's Modulus": ("young_pa", {"Pa"}),
+            "Density": ("density_kg_m3", {"kg m^-3"}),
+            "Thermal Conductivity": (
+                "conductivity_w_mk",
+                {"W m^-1 C^-1", "W m^-1 K^-1"},
+            ),
+        },
     )
 
 
@@ -283,7 +303,7 @@ def validate_coordinates(
         }
 
 
-def validate_coordinate_receipt(
+def validate_basic_receipt(
     receipt: Any, report: dict, parameters: dict, resolved: dict[str, Path], base: Path
 ) -> dict:
     from .config import require_allowed_file
@@ -298,13 +318,30 @@ def validate_coordinate_receipt(
     def read(role):
         return json.loads(source(role).read_text(encoding="utf-8"))
 
-    properties = structural_steel_properties(source("material"))
-    checked = validate_coordinates(
-        report,
-        {**parameters, **properties},
-        nodal_vectors(source("global_field")),
-        nodal_vectors(source("rotated_field")),
-    )
+    transient = receipt.validator == "transient_sdof"
+    if transient:
+        from .transient_benchmark import (
+            transient_material,
+            transient_curve,
+            validate_transient,
+        )
+
+        properties = transient_material(source("material"), parameters["material_name"])
+        checked = validate_transient(
+            report,
+            {**parameters, **properties},
+            transient_curve(source("transient_field"), report),
+        )
+        names = ("transient",)
+    else:
+        properties = structural_steel_properties(source("material"))
+        checked = validate_coordinates(
+            report,
+            {**parameters, **properties},
+            nodal_vectors(source("global_field")),
+            nodal_vectors(source("rotated_field")),
+        )
+        names = ("global", "rotated")
     checks = checked["checks"]
     checks["material_constants"] = all(
         parameters[key] == value for key, value in properties.items()
@@ -335,7 +372,7 @@ def validate_coordinate_receipt(
         == integrity["copy_sha256"]
         == file_sha256(source("geometry_copy"))
     )
-    for name in ("global", "rotated"):
+    for name in names:
         result = source(name + "_result")
         checks[name + "_native_result"] = (
             result.stat().st_size > 0

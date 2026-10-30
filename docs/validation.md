@@ -7,6 +7,14 @@ are retained only in the local ignored run directory.
 
 ## Baseline
 
+P4 transient case (2026-10-30): a new Workbench Transient Structural project,
+project-local zero-Poisson material and native tip PointMass were solved with
+4 SMP cores. DPF read all 800 result sets; the independent undamped SDOF reference
+gave relative L2 error 0.544548% and maximum error/analytical peak 0.503675%.
+Geometry hashes, native timing/units/inputs, save and shutdown passed. This
+is a mass-dominated axial FE benchmark, not general transient-model validation.
+See [the pack](mechanical-basics.md#transient-structural-benchmark).
+
 P4 first case (2026-10-30): a new Workbench coordinate/named-selection benchmark
 passed two 4-core static solves and native DPF comparison of 6,696 nodal vectors.
 Vector equivalence error/peak was 7.36148e-12; analytical beam-tip error 0.309014%.

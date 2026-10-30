@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Adds a Workbench-first transient structural benchmark with project-local
+  Engineering Data, a native tip PointMass, all-time DPF readback and an
+  independent undamped SDOF step-response reference. Seven P4 cases remain pending.
+- Selects Mechanical basic cases through the existing acceptance runner's case
+  registry and shares receipt integrity checks; no new MCP tools or dependencies.
+- Canonicalizes surrounding XML-unit whitespace while keeping physical SI-unit
+  requirements and dimensionless-material validation strict.
 - Adds the first Mechanical basic-analysis acceptance: coordinate-system and
   named-selection load equivalence through Workbench, sequential 4-core static
   solves, native DPF nodal-vector readback and an independent beam reference.

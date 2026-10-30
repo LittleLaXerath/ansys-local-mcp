@@ -16,6 +16,10 @@ use fresh generated projects; measured support is listed in
 `coordinate.py` 是显式验收脚手架生成的带参数可信脚本，不应直接运行无参数的产品源脚本。
 真实执行及完整 DPF 数值比较请使用[基础验收入口](../docs/mechanical-basics.md)。
 
+[瞬态结构模板](mechanical_transient.workflow.example.json) 使用同一 mechanical step，
+通过现有 Engineering Data 操作创建工程内材料。带参数脚本由 `--case transient_sdof`
+验收入口生成；完整时间历程导出和数值比较不以该单步模板执行成功代替。
+
 [Fluent 持久会话示例](fluent_persistent.workflow.example.json) 演示创建、跨 step 复用和显式关闭；
 真实执行会启动 Fluent，检查格式时请使用 `validation_mode="schema"`。
 

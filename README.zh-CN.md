@@ -165,8 +165,8 @@ Actions：`get_template`、`create_system`、`get_system`、`get_component`、`g
 
 ## Mechanical 基础验收
 
-Mechanical 基础分析进度见[验收包](docs/mechanical-basics.md)：坐标系与命名选择已通过
-真实 Workbench/DPF 等价性验收，并可查询回执；其余八项基础分析仍待实施。
+Mechanical 基础分析进度见[验收包](docs/mechanical-basics.md)：坐标系/命名选择和集中质量
+轴向瞬态基准已通过真实 Workbench/DPF 验收，并可查询回执；其余七项仍待实施。
 
 ## PyFluent
 

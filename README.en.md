@@ -218,8 +218,8 @@ returns `PhysicsStatus`; it does not create a mesh or solve. See
 ## Mechanical Basic Acceptance
 
 Mechanical basic-analysis progress is tracked in [the acceptance pack](docs/mechanical-basics.md).
-Coordinate systems/named selections have a real Workbench/DPF equivalence
-benchmark and queryable evidence; the other eight planned analyses remain pending.
+Coordinate systems/named selections and an undamped transient SDOF-reference
+benchmark have real Workbench/DPF evidence; the other seven planned analyses remain pending.
 
 ## PyFluent
 
