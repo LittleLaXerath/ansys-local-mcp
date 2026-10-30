@@ -31,6 +31,7 @@ from ansys_mcp.transient_benchmark import (
     find_transient_material,
 )
 from ansys_mcp.harmonic_benchmark import harmonic_curve, validate_harmonic
+from ansys_mcp.remaining_benchmarks import specifications
 from tools._mcp_acceptance import mcp_client, tool_value
 from tools.run_product_acceptance import _wrapper
 
@@ -78,6 +79,7 @@ CASE_SPECS = {
         },
     },
 }
+CASE_SPECS.update(specifications())
 
 
 def material_operations(parameters):
@@ -95,6 +97,54 @@ def material_operations(parameters):
             **({"store_as": store_as} if store_as else {}),
         }
 
+    if parameters["material_name"] == "Structural Steel":
+        return []
+    if parameters["material_name"] == "MCP Air":
+        return [
+            operation(
+                "material",
+                "EngineeringData",
+                "CreateMaterial",
+                {"Name": "MCP Air"},
+                "air",
+            ),
+            operation(
+                "density",
+                reference("air"),
+                "CreateProperty",
+                {"Name": "Density"},
+                "density",
+            ),
+            operation(
+                "set_density",
+                reference("density"),
+                "SetData",
+                {
+                    "SheetName": "",
+                    "Index": 0,
+                    "Variables": ["Density"],
+                    "Values": [["1.2 [kg m^-3]"]],
+                },
+            ),
+            operation(
+                "sound",
+                reference("air"),
+                "CreateProperty",
+                {"Name": "Speed of Sound"},
+                "sound",
+            ),
+            operation(
+                "set_sound",
+                reference("sound"),
+                "SetData",
+                {
+                    "SheetName": "",
+                    "Index": 0,
+                    "Variables": ["Speed of Sound"],
+                    "Values": [["343 [m s^-1]"]],
+                },
+            ),
+        ]
     return [
         operation(
             "material",
@@ -290,19 +340,22 @@ async def execute(
             _write_json(directory / "report.json", report)
             steps = []
             for name in specification["results"]:
+                field_spec = specification.get("field_specs", {}).get(
+                    name, ("rst", "displacement")
+                )
                 steps.append(
                     {
                         "id": name,
                         "type": "dpf",
                         "recipe": {
                             "result_files": [
-                                {"path": str(directory / (name + ".rst"))}
+                                {"path": str(directory / (name + "." + field_spec[0]))}
                             ],
                             "operations": [
                                 {
                                     "op": "result",
                                     "id": "u",
-                                    "name": "displacement",
+                                    "name": field_spec[1],
                                     "time_scoping": list(
                                         range(
                                             1,
@@ -310,11 +363,19 @@ async def execute(
                                         )
                                     )
                                     if axis
+                                    else -1
+                                    if "field_specs" in specification
                                     else 1,
                                     "requested_location": "Nodal",
                                     **(
                                         {"mesh_scoping": report["tip_node_ids"]}
                                         if axis
+                                        else {
+                                            "mesh_scoping": [
+                                                int(n) for n in report["node_x_m"]
+                                            ]
+                                        }
+                                        if "field_specs" in specification
                                         else {}
                                     ),
                                 },
@@ -330,7 +391,9 @@ async def execute(
                 )
             await run("02-fields", steps)
             properties, material_file = (
-                find_transient_material(directory, parameters["material_name"])
+                specification["material_loader"](directory, parameters)
+                if "material_loader" in specification
+                else find_transient_material(directory, parameters["material_name"])
                 if "material_name" in parameters
                 else find_structural_steel(directory)
             )
@@ -339,13 +402,40 @@ async def execute(
             parameters["sources"] = {
                 "material": str(material_file),
                 **{
+                    "table_" + key: value
+                    for key, value in report.get("native_tables", {}).items()
+                },
+                **{
+                    "log_" + key: value
+                    for key, value in report.get("solver_logs", {}).items()
+                },
+                **{
                     name + "_field": str(directory / (name + ".csv"))
                     for name in specification["results"]
                 },
             }
             _write_json(directory / "validation-parameters.json", parameters)
             validation = (
-                specification["validator"](
+                specification["bundle_validator"](
+                    report,
+                    parameters,
+                    {
+                        **{
+                            name: directory / (name + ".csv")
+                            for name in specification["results"]
+                        },
+                        **{
+                            "table_" + key: Path(value)
+                            for key, value in report.get("native_tables", {}).items()
+                        },
+                        **{
+                            "log_" + key: Path(value)
+                            for key, value in report.get("solver_logs", {}).items()
+                        },
+                    },
+                )
+                if "bundle_validator" in specification
+                else specification["validator"](
                     report,
                     parameters,
                     specification["curve_reader"](
@@ -416,7 +506,7 @@ async def execute(
                 "geometry_copy": str(destination),
                 "script": str(snapshot),
                 **{
-                    name + "_result": str(directory / (name + ".rst"))
+                    name + "_result": report["cases"][name]["result_file"]
                     for name in specification["results"]
                 },
             }

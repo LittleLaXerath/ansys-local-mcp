@@ -2,10 +2,20 @@
 
 ## Unreleased
 
+- Completes the six remaining planned basic benchmark workflows through the
+  existing Workbench/Mechanical/DPF channels: response spectrum, one-sigma PSD,
+  Euler buckling, transient conduction, closed-cavity acoustics and native
+  thermal/structural transfer. All nine basic cases have scoped numerical
+  evidence, not full Mechanical or specialized-extension coverage.
+- Adds shared case/material/result registration, original modal-participation
+  checks, explicit PSD static/RMS set identification and mesh-coordinate units.
+  No new MCP tools, step types, schema resources or runtime dependencies.
+- Keeps failed/cancelled trials and records only observed conditional API calls.
+
 - Adds a Workbench-first Full harmonic benchmark with a native PointMass,
   explicit mass-proportional damping and independent complex frequency-response
   checks. Both complex parts, all native frequency sets and final Mechanical
-  amplitude are verified; six P4 basic cases remain pending.
+  amplitude are verified.
 - Preserves and validates Mechanical real/imaginary frequency-record mapping
   instead of treating both records as separate DPF frequency-set IDs.
 

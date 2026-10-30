@@ -1,0 +1,24 @@
+{
+  "version": "1",
+  "workdir": ".",
+  "variables": {
+    "geometry_path": "beam.step",
+    "template_name": "Steady-State Thermal (ANSYS)",
+    "acceptance_script": "thermal_expansion.py",
+    "project_path": "thermal_expansion.wbpj"
+  },
+  "steps": [{
+    "id": "basic_analysis",
+    "type": "mechanical",
+    "recipe": {
+      "backend": "workbench",
+      "mode": "batch",
+      "project": {
+        "geometry_path": "${geometry_path}",
+        "template_name": "${template_name}",
+        "save_path": "${project_path}"
+      },
+      "operations": [{"id": "benchmark", "op": "script", "script_path": "${acceptance_script}"}]
+    }
+  }]
+}

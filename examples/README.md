@@ -24,6 +24,11 @@ use fresh generated projects; measured support is listed in
 `--case harmonic_sdof` 生成参数化脚本，并按原生频率集合导出实部/虚部，独立比较频响幅值和相位；
 Mechanical 实虚记录与 DPF 频率编号的映射会显式核对。
 
+[基础分析模板](mechanical_basic_analyses.workflow.example.json) 展示六项后续分析复用的既有通道，
+默认是顺序热结构脚本入口。完整验收使用 `tools.run_mechanical_basics --case`，可选
+`response_spectrum`、`random_vibration`、`buckling`、`transient_heat`、`acoustic_cavity`、
+`thermal_expansion`。各项固定参考、资源上限、单位和结果集选择见[基础验收包](../docs/mechanical-basics.md)。
+
 [Fluent 持久会话示例](fluent_persistent.workflow.example.json) 演示创建、跨 step 复用和显式关闭；
 真实执行会启动 Fluent，检查格式时请使用 `validation_mode="schema"`。
 

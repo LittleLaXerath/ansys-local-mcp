@@ -7,6 +7,22 @@ are retained only in the local ignored run directory.
 
 ## Baseline
 
+P4 basic pack (2026-10-30): all nine scoped benchmark gates now passed. The six
+new results are response spectrum (0.004%), random-vibration RMS (0.003215%),
+Euler buckling (0.289905%), transient conduction (0.341759% of imposed temperature
+range), three cavity frequencies (maximum 0.003385%), and native-temperature
+transfer/free expansion (relative error below 1e-10). Each used a new project,
+4 SMP cores, saved material/input readbacks, fresh native files, source-geometry
+hashes and confirmed shutdown. Two new MCP clients from different directories
+revalidated all nine receipts and the retained Fluent/CFX workflows. Earlier
+failures/cancellation and a retracted preliminary evidence index remain retained.
+See [scope, methods and results](mechanical-basics.md#additional-basic-analyses).
+
+Latest local non-product regression: 378 tests, 376 passed, two explicit opt-in
+skips, zero failures/errors in the supported Windows worker environment.
+This does not remove the ordinary medium-token WMI limitation, validate every
+Mechanical API/extension, or complete the full CFX Re100 regression.
+
 P4 harmonic case (2026-10-30): a new Workbench Full harmonic project with native
 PointMass and explicit mass-proportional damping passed 100-frequency complex
 displacement checks. Maximum complex error 0.0262003%, amplitude error 0.0150184%
@@ -15,7 +31,7 @@ shutdown passed. The first DPF frequency-mapping failure remains retained.
 This is not mode-superposition or arbitrary vibration validation. See
 [the harmonic pack](mechanical-basics.md#harmonic-response-benchmark).
 
-Latest non-product regression: 358 tests, 356 passed, two explicit opt-in skips,
+Earlier harmonic-stage regression: 358 tests, 356 passed, two explicit opt-in skips,
 zero failures/errors in the supported Windows worker environment. Ordinary
 medium-token WMI limitations still apply; CI never starts a product.
 
@@ -144,19 +160,19 @@ members and the current installation/backend, not every entry with the same tag.
 | Mesh | 4,626 | Quadratic swept solid meshes |
 | Connections | 7,399 | Frictional contact and remote displacement |
 | Loads/constraints | 9,783 | Force, temperature and tabular pressure in measured cases |
-| Solve | 2,237 | Static, modal and steady thermal measured cases |
+| Solve | 2,237 | Static, modal, steady thermal and the documented nine-case basic pack |
 | Results | 36,566 | Nodal fields, reaction/flux/contact results, CSV and native PNG/GIF exports |
 | Parameters | 2,347 | Input/output creation, readback and two retained design-point updates |
 | Static structural | 2 | Cantilever and contact compression |
 | Transient structural | 1 | Undamped mass-dominated axial step-response benchmark |
 | Modal | 88 | First cantilever frequency |
 | Harmonic | 104 | Full-method mass-damped axial complex-response benchmark |
-| Response spectrum | 2 | Catalogued; dedicated solve not verified |
-| Random vibration | 1 | Catalogued; dedicated solve not verified |
-| Buckling | 2 | Catalogued; dedicated solve not verified |
-| Thermal | 3,010 | Steady one-dimensional conduction |
-| Acoustic | 3,112 | Catalogued; dedicated solve not verified |
-| Coupled field/data transfer | 6 | Catalogued; dedicated workflow not verified |
+| Response spectrum | 2 | Flat pseudo-acceleration/SRSS, native modal participation and displacement |
+| Random vibration | 1 | One-sided acceleration PSD, explicit one-sigma relative displacement and independent integral |
+| Buckling | 2 | Linked compressive preload and linear Euler-column load factor |
+| Thermal | 3,010 | Steady conduction and documented transient conduction history |
+| Acoustic | 3,112 | Closed rigid cavity, three nonzero frequencies and native pressure eigenfields |
+| Coupled field/data transfer | 6 | Actual native thermal-result import, target temperature and free-expansion readback |
 | Explicit Dynamics | 183 | Low-speed elastic contact solve and motion sanity; no failure/convergence claim |
 | LS-DYNA | 86 | Low-speed elastic contact solve and motion sanity; extension-specific solver properties |
 | Rigid body dynamics | 69 | Ground-slider mechanism and prescribed 1 mm motion |

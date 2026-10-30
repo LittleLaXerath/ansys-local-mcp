@@ -11,12 +11,12 @@ It does **not** claim coverage of every Mechanical analysis or extension.
 | Coordinate systems and named selections | Passed on the documented v261 benchmark |
 | Transient structural | Passed for the documented undamped mass-dominated axial benchmark |
 | Harmonic response | Passed for the documented Full-method, mass-damped axial benchmark |
-| Response spectrum | Pending |
-| Random vibration | Pending |
-| Eigenvalue buckling | Pending |
-| Transient thermal | Pending |
-| Basic acoustics | Pending |
-| Sequential thermal/structural transfer | Pending |
+| Response spectrum | Passed for the documented flat pseudo-acceleration/SRSS benchmark |
+| Random vibration | Passed for the documented one-sided acceleration PSD / one-sigma benchmark |
+| Eigenvalue buckling | Passed for the documented cantilever Euler-column benchmark |
+| Transient thermal | Passed for the documented one-dimensional conduction history |
+| Basic acoustics | Passed for the first three nonzero modes of the documented closed cavity |
+| Sequential thermal/structural transfer | Passed for the documented native-temperature import / free-expansion benchmark |
 
 ACP, DesignLife, optimization, additive and third-party ACT remain later,
 separately scoped acceptance packages. Catalog entries are not passed tests.
@@ -178,7 +178,99 @@ sets. That failed run remains unchanged; a fresh corrected run passed.
 query_capabilities(product="mechanical", version="261", kind="workflow", component="harmonic_sdof")
 ```
 
-Six other planned basic analysis cases remain pending.
+The additional six basic cases are documented below; this does not extend the
+harmonic benchmark's own numerical scope.
+
+## Additional Basic Analyses
+
+The same opt-in runner accepts `--case response_spectrum`, `random_vibration`,
+`buckling`, `transient_heat`, `acoustic_cavity`, or `thermal_expansion`. Each
+creates a new project/copy, validates before execution, uses 4 SMP cores and a
+1,800 s budget, reads native results with DPF and confirms shutdown. A shared
+trusted product script and case registry avoid per-analysis MCP tools.
+
+- **Response spectrum:** a flat pseudo-acceleration spectrum, 1 m/s² between
+  20 and 200 Hz, with SRSS combination. The declared 5% damping is the definition
+  of the supplied response-spectrum curve, not a claim to set a hidden native
+  model-damping control. Native modal participation, mass-normalized DPF shape,
+  modal linkage, spectrum units/direction, and peak relative displacement are
+  checked against `Sa/(E*A/(L*m))`. Six modes are extracted; the dominant X
+  mode is identified from the native X participation table, not assumed to be
+  mode one. No extra constraints are imposed on the rigid mass attachment.
+- **Random vibration:** a one-sided flat acceleration PSD of
+  0.01 (m/s²)²/Hz between 20 and 120 Hz. Constant damping is explicitly Manual,
+  modal damping ratio 0.05 and mass/stiffness coefficients zero. Relative
+  directional displacement is explicitly one sigma. Independent Simpson
+  integration of the SDOF transfer function over **Hz** is refined before
+  comparison; RMS is not compared with a peak or three-sigma value. Native
+  result tables and DPF displacements must agree.
+  The result file contains both a unit-base static solution and the one-sigma
+  solution. Native load step/substep/iteration identify the latter explicitly;
+  the first DPF field is never assumed to be the RMS result.
+- **Eigenvalue buckling:** a fixed-root/free-tip column under a 1 N compressive
+  preload, linked to native Eigenvalue Buckling. The positive first multiplier
+  times preload is compared with `pi²*E*I/(4*L²)`, with a 5% tolerance. This is
+  a linear bifurcation check, not a nonlinear collapse prediction.
+- **Transient thermal:** initially 0°C, left end held at 0°C and right end at
+  100°C, with insulated lateral walls. Fixed dt=0.25 s through 100 s and all
+  400 native time sets are read. The one-dimensional Fourier-series conduction
+  reference uses saved conductivity, density and specific heat. The comparison
+  window is defined in advance as 10–100 s; maximum nodal error divided by the
+  100°C imposed temperature range must be <=1%. Native mesh coordinates are
+  converted from the CAD unit and checked against the measured length.
+- **Modal acoustics:** a closed, rigid rectangular air cavity with density
+  1.2 kg/m³ and sound speed 343 m/s. A new native Modal Acoustic analysis is
+  created inside the Workbench-owned model (no unavailable standalone template
+  is assumed). Three nonzero longitudinal frequencies are compared with
+  `n*c/(2*L)`; nonempty native pressure eigenfields are read, but their normalized
+  amplitudes are not interpreted as forced acoustic pressure.
+- **Sequential thermal/structural:** an actual native thermal result at 72°C is
+  imported by Imported Body Temperature into a fresh structural analysis with
+  a 22°C reference. Root axial and minimal vertex constraints remove rigid
+  motion without preventing free expansion. Source temperature, mapped target
+  structural temperature and displacement are read independently; the axial
+  reference is `alpha*(72-22)*L`, with <=1% tolerance. Setting an unrelated
+  structural temperature manually cannot replace the transfer.
+
+See [the shared workflow template](../examples/mechanical_basic_analyses.workflow.example.json).
+It references a parameterized script generated by the opt-in runner. Run the
+runner for complete field exports, material creation where needed, independent
+numerical checks, closure and receipts; the single-step template is not itself
+a full acceptance sequence.
+
+### Recorded Results
+
+Measured 2026-10-30 on v261, using independent new projects and 4 SMP cores:
+
+| Case | Independent reference and measured result | Error |
+| --- | --- | --- |
+| Response spectrum | 5e-6 m reference; 5.0002e-6 m native table; X effective-mass ratio 0.999974 | 0.004% |
+| Random vibration | 1.6497469678e-5 m integrated RMS; 1.6498e-5 m one-sigma native table, confirmed with DPF | 0.003215% |
+| Buckling | 41,123.351671 N Euler reference; 41,004.132919 N critical load | 0.289905% |
+| Transient thermal | 400 native time sets; 224,181 nodal/time comparisons in the declared window | 0.341759% of imposed temperature range |
+| Modal acoustics | 1715/3430/5145 Hz references; 1715.000724/3430.023083/5145.174173 Hz measured | Maximum 0.003385% |
+| Thermal/structural | 72°C source and mapped target fields; 6e-5 m axial expansion reference | Relative error below 1e-10 |
+
+The successful native runs included project save, all input/material/unit
+readbacks, source-geometry integrity, independent receipt revalidation and
+confirmed shutdown. Two fresh stdio MCP clients from different working
+directories returned the expected verified run for all nine basic cases;
+existing Fluent/CFX workflow evidence remained verified.
+
+Earlier failed runs are retained. These exposed unsupported body-scoped
+displacement, read-only damping properties until the correct native control is
+selected, mesh-coordinate unit conversion, and the PSD static/RMS set mapping.
+A trial that removed the Workbench-owned initial analysis stalled before solve;
+only its authenticated original task was cancelled and then explicitly closed.
+The final acoustic recipe leaves that owning analysis intact. A preliminary
+acoustic evidence index lacking a conditional-call observation was archived,
+not used as final evidence; the fresh run records creation versus reuse of a
+physics region and claims only actual API calls.
+
+All nine **basic benchmark gates** are now passed, not every Mechanical API or
+extension. Stress-based spectral fatigue, nonlinear collapse, arbitrary
+geometry/materials, fluid/structure acoustics, nonuniform transfer and mesh/time
+independence remain outside these cases. Full CFX Re100 regression is separate.
 
 ## Receipt Integrity
 
@@ -198,7 +290,8 @@ evidence; no other analysis API is inferred from these benchmarks.
 
 ## 中文说明
 
-目前通过“坐标系与命名选择”“集中质量主导的轴向瞬态响应”和“全法质量比例阻尼轴向谐响应”
-三项，均有新工程、原生结果比较、单位/几何/材料读回、关闭确认与回执。不是 P4 全部完成。
-其余六项仍待真实验收，不能以已有 API 目录或这三项通过替代。工程、原生结果、失败记录和完整报告仅保留
-在忽略的私有目录，不进入 GitHub 仓库。
+计划中的九项基础验收均已通过：坐标系/命名选择、瞬态结构、谐响应、响应谱、随机振动、
+屈曲、瞬态热、基础声学和顺序热结构传递。均有新工程、独立参考、原生字段读回、关闭确认
+及可查询回执；不是 Mechanical 全组件/全模型验收。ACP、DesignLife、优化、增材及第三方
+ACT 等专用包仍另列后续。原工程不覆盖，失败和取消记录保留；工程、原生结果和完整报告
+仅保留在忽略的私有目录，不进入 GitHub 仓库。

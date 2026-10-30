@@ -67,6 +67,17 @@ Ordinary CI runs group 1 and 2 only, with the opt-in variables unset.
 - `tools.run_checks` records unique affected test IDs and UTF-8 logs. See
   [Operations](operations.md) for commands, receipt and maintenance boundaries.
 
+## P4 Completion Baseline (2026-10-30)
+
+The latest local non-product run considered **378 tests: 376 passed, two explicit
+opt-in skips, zero failures/errors**, in the supported Windows worker environment.
+New benchmark and receipt tests use synthetic fixtures only; no solver or UAC is
+started by them. They cover native participation/field labels, one-sigma versus
+static-base PSD records, full transient temperatures, mapped target temperatures,
+conditional API claims and original-export integrity. Real numerical evidence
+comes from the separately authorized [nine-case basic pack](mechanical-basics.md),
+not these simulated tests. The ordinary medium-token WMI limitation is unchanged.
+
 ## Evidence store
 
 - Default: `<default workdir>/.ansys_mcp/capability_evidence/v<version>/<fingerprint>.jsonl`.

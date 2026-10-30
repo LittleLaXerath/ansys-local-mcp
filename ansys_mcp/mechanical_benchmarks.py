@@ -320,7 +320,15 @@ def validate_basic_receipt(
 
     transient = receipt.validator == "transient_sdof"
     harmonic = receipt.validator == "harmonic_sdof"
-    if harmonic:
+    from .remaining_benchmarks import CASE_FIELDS, read_material, validate_remaining
+    if receipt.validator in CASE_FIELDS:
+        properties = read_material(source("material"),parameters)
+        names = tuple(CASE_FIELDS[receipt.validator])
+        paths = {name:source(name+"_field") for name in names}
+        paths.update({"table_"+name:source("table_"+name) for name in report.get("native_tables",{})})
+        paths.update({"log_"+name:source("log_"+name) for name in report.get("solver_logs",{})})
+        checked = validate_remaining(report,{**parameters,**properties},paths)
+    elif harmonic:
         from .transient_benchmark import transient_material
         from .harmonic_benchmark import harmonic_curve, validate_harmonic
 

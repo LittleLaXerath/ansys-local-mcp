@@ -25,6 +25,12 @@ This project is not affiliated with, endorsed by, or sponsored by Ansys.
 
 ## v0.3 Mechanical and DPF / Mechanical 与 DPF
 
+All nine planned Mechanical basic benchmarks have scoped Workbench/DPF evidence;
+this is not full API or extension coverage. [Scope and results](docs/mechanical-basics.md).
+
+九项计划内 Mechanical 基础验收已有对应 Workbench/DPF 证据，不等于全 API 或专用扩展覆盖。
+[查看范围与结果](docs/mechanical-basics.md)。
+
 - Workbench-first and independent Mechanical backends with typed object operations.
 - Persistent sessions, background jobs, cancellation and request observation.
 - Complete installed public-stub inventory with separate runtime and validation status.

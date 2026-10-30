@@ -82,17 +82,21 @@ no automatic elevation, permission-policy change or lifetime-bound fallback was 
   shedding regression and the historical stall investigation remain pending.
 - RMS targets belong to preprocessing physics settings, not to solver CLI flags.
 
-## K-07 · Mechanical catalog coverage far exceeds measured evidence — `pending` (P4)
+## K-07 · Mechanical catalog coverage exceeds measured evidence — specialized scope `pending`
 
-- The v261 inventory contains 56,936 unique entries; the local evidence store
-  holds tens of observations. Many analysis types (harmonic, response spectrum,
-  random vibration, buckling, acoustic, coupled field, composites, optimization,
-  additive, ACT extensions) are catalogued but have no dedicated workflow
-  acceptance.
+- The v261 inventory contains 56,936 unique entries; observations are not a
+  namespace-wide coverage claim. All nine planned P4 basic benchmarks now have
+  dedicated, scoped numerical acceptance, including response spectrum, PSD,
+  buckling, transient thermal, a closed acoustic cavity and temperature transfer.
+  Composites, optimization, additive, DesignLife and external ACT extensions
+  still need separately defined product acceptance. Arbitrary models and all
+  members of the tested analysis categories have not been validated.
 - The component matrix in [validation.md](validation.md) remains the source of
   truth for what is measured.
 
-## K-08 · No automated product regression — `pending`
+## K-08 · Unattended product CI — intentionally not enabled
 
 - CI runs unit tests, compilation, publication checks and builds; it never
-  starts a product. Product acceptance stays opt-in and manual by design.
+  starts a product. The opt-in runners automate native product workflows and
+  numerical comparisons after explicit execution authorization; they are not
+  an unattended CI solver service.

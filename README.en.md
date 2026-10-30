@@ -218,9 +218,11 @@ returns `PhysicsStatus`; it does not create a mesh or solve. See
 ## Mechanical Basic Acceptance
 
 Mechanical basic-analysis progress is tracked in [the acceptance pack](docs/mechanical-basics.md).
-Coordinate systems/named selections, an undamped transient SDOF-reference
-benchmark and a Full-method damped harmonic benchmark have real Workbench/DPF
-evidence; the other six planned analyses remain pending.
+All nine planned basic benchmarks now have real Workbench/DPF evidence:
+coordinates/selections, transient structural, harmonic response, response spectrum,
+random vibration, eigenvalue buckling, transient thermal, modal acoustics and
+sequential thermal/structural transfer. This is not full Mechanical API/extension
+coverage; specialized packages and full CFX Re100 regression remain separate.
 
 ## PyFluent
 

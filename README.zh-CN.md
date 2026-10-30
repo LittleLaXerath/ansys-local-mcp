@@ -165,8 +165,9 @@ Actions：`get_template`、`create_system`、`get_system`、`get_component`、`g
 
 ## Mechanical 基础验收
 
-Mechanical 基础分析进度见[验收包](docs/mechanical-basics.md)：坐标系/命名选择、集中质量
-轴向瞬态和全法有阻尼谐响应基准已通过真实 Workbench/DPF 验收，并可查询回执；其余六项仍待实施。
+Mechanical 的九项计划内基础验收均已通过真实 Workbench/DPF 验收，并可查询回执：坐标系/选择、
+瞬态结构、谐响应、响应谱、随机振动、屈曲、瞬态热、基础声学、顺序热结构传递。
+各自范围和误差见[验收包](docs/mechanical-basics.md)；这不代表所有 Mechanical API、专用扩展或完整 CFX 回归已完成。
 
 ## PyFluent
 
