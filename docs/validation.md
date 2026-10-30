@@ -7,6 +7,13 @@ are retained only in the local ignored run directory.
 
 ## Baseline
 
+P4 first case (2026-10-30): a new Workbench coordinate/named-selection benchmark
+passed two 4-core static solves and native DPF comparison of 6,696 nodal vectors.
+Vector equivalence error/peak was 7.36148e-12; analytical beam-tip error 0.309014%.
+Source geometry hashes matched and product shutdown was confirmed. A run-scoped
+receipt is queryable. This does not complete the other eight P4 analyses.
+See [basic acceptance](mechanical-basics.md).
+
 CFD evidence follow-up (2026-10-29): the retained Fluent channel and CFX short
 restart were independently revalidated and imported as workflow receipts.
 Two fresh MCP connections with different starting directories returned the same

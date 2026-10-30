@@ -215,6 +215,12 @@ exports and volume measurements. CFX changes existing turbulence settings and
 returns `PhysicsStatus`; it does not create a mesh or solve. See
 [prerequisites and verification limits](examples/README.md).
 
+## Mechanical Basic Acceptance
+
+Mechanical basic-analysis progress is tracked in [the acceptance pack](docs/mechanical-basics.md).
+Coordinate systems/named selections have a real Workbench/DPF equivalence
+benchmark and queryable evidence; the other eight planned analyses remain pending.
+
 ## PyFluent
 
 Retained Fluent/CFX numerical checks can be registered as hash-bound workflow

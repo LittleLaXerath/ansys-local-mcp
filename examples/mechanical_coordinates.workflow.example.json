@@ -1,0 +1,25 @@
+{
+  "version": "1",
+  "workdir": ".",
+  "variables": {
+    "geometry_path": "beam.step",
+    "coordinate_script": "coordinate.py"
+  },
+  "steps": [
+    {
+      "id": "coordinates",
+      "type": "mechanical",
+      "recipe": {
+        "backend": "workbench",
+        "mode": "batch",
+        "project": {
+          "geometry_path": "${geometry_path}",
+          "save_path": "coordinates.wbpj"
+        },
+        "operations": [
+          {"id": "benchmark", "op": "script", "script_path": "${coordinate_script}"}
+        ]
+      }
+    }
+  ]
+}

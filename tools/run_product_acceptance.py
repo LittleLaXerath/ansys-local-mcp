@@ -13,7 +13,6 @@ import json
 import math
 import shutil
 import time
-import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -30,6 +29,7 @@ from ansys_mcp.workflow import run_workflow
 
 
 from ansys_mcp.benchmarks import analytic_references
+from ansys_mcp.mechanical_benchmarks import material_properties
 
 
 def _write_json(path: Path, data: Any) -> None:
@@ -118,37 +118,6 @@ def _run_geometry(workflow: dict[str, Any], directory: Path, elevation: str) -> 
     finally:
         if terminal:
             _write_json(directory / "geometry.worker_closed.json", proxy.close())
-
-
-def material_properties(output_dir: Path) -> dict[str, float]:
-    candidates = list(output_dir.rglob("EngineeringData.xml")) + list(output_dir.rglob("MatML.xml"))
-    for source in candidates:
-        document = ET.parse(source).getroot()
-        names = {node.attrib["id"]: node.findtext("Name") for node in document.findall(".//ParameterDetails")}
-        details = {node.attrib["id"]: node for node in document.findall(".//ParameterDetails")}
-        for material in document.findall(".//Material"):
-            bulk = material.find("BulkDetails")
-            if bulk is None or bulk.findtext("Name") != "Structural Steel":
-                continue
-            values = {}
-            for parameter in bulk.findall(".//ParameterValue"):
-                name = names.get(parameter.get("parameter"))
-                if name in {"Young's Modulus", "Density", "Thermal Conductivity"}:
-                    text = parameter.findtext("Data", "")
-                    if "," in text:
-                        raise ValueError("Acceptance expects temperature-independent scalar material properties.")
-                    unit = next((node.text or "" for node in parameter.findall("Qualifier") if node.get("name") == "Units"), "")
-                    if not unit:
-                        units = details[parameter.get("parameter")].findall("Units/Unit")
-                        unit = " ".join((node.findtext("Name") or "") + ("^" + node.get("power") if node.get("power") not in {None, "1"} else "") for node in units)
-                    expected = {"Young's Modulus": "Pa", "Density": "kg m^-3", "Thermal Conductivity": "W m^-1 C^-1"}[name]
-                    if unit not in {expected, "W m^-1 K^-1" if name == "Thermal Conductivity" else expected}:
-                        raise ValueError("Material unit differs from the SI benchmark contract: " + name + " " + unit)
-                    values[name] = float(text)
-            if len(values) == 3:
-                return {"young_pa": values["Young's Modulus"], "density_kg_m3": values["Density"],
-                        "conductivity_w_mk": values["Thermal Conductivity"]}
-    raise ValueError("Saved Workbench Engineering Data does not prove the three benchmark material properties.")
 
 
 def mechanical_nodal_values(path: Path) -> dict[int, float]:

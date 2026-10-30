@@ -9,15 +9,11 @@ import sys
 import time
 import uuid
 import traceback
-from datetime import timedelta
-from contextlib import asynccontextmanager
 from pathlib import Path
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-
-from ansys_mcp.config import merge_local_no_proxy, require_allowed_path
+from ansys_mcp.config import require_allowed_path
 from ansys_mcp.jobs import _write_json
+from tools._mcp_acceptance import mcp_client as client, tool_value as data
 
 
 def write_channel_mesh(path: Path, nx: int = 80, ny: int = 30, length: float = 0.2, height: float = 0.01) -> None:
@@ -56,26 +52,6 @@ def write_channel_mesh(path: Path, nx: int = 80, ny: int = 30, length: float = 0
         lines.append(f'(45 ({zone:x} {kind} {name})())')
         first = last + 1
     path.write_text('\n'.join(lines) + '\n', encoding='ascii')
-
-
-@asynccontextmanager
-async def client(directory: Path):
-    project = Path(__file__).resolve().parents[1]
-    env = merge_local_no_proxy(os.environ)
-    params = StdioServerParameters(command=sys.executable, args=[str(project / "ansys_mcp_server.py")], env=env)
-    with (directory / "mcp.stderr.log").open("a", encoding="utf-8") as log:
-        async with stdio_client(params, errlog=log) as (read, write):
-            async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=1820)) as session:
-                await session.initialize()
-                yield session
-
-
-def data(result):
-    if result.isError:
-        raise RuntimeError("MCP rejected the request: " + str(result.content))
-    if result.structuredContent:
-        return result.structuredContent
-    return json.loads(next(block.text for block in result.content if block.type == "text"))
 
 
 async def execute(directory: Path, case: str, runtime: str = "bundled"):

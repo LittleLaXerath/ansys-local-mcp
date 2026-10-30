@@ -12,6 +12,10 @@ use fresh generated projects; measured support is listed in
 默认测试使用模拟产品对象和普通工作进程；真实产品验收单独显式运行，采用新生成的隔离工程。
 已测范围见[验收记录](../docs/validation.md)。Schema 通过不等于建模、网格或求解成功。
 
+[Mechanical 坐标系模板](mechanical_coordinates.workflow.example.json) 展示既有 mechanical step；
+`coordinate.py` 是显式验收脚手架生成的带参数可信脚本，不应直接运行无参数的产品源脚本。
+真实执行及完整 DPF 数值比较请使用[基础验收入口](../docs/mechanical-basics.md)。
+
 [Fluent 持久会话示例](fluent_persistent.workflow.example.json) 演示创建、跨 step 复用和显式关闭；
 真实执行会启动 Fluent，检查格式时请使用 `validation_mode="schema"`。
 

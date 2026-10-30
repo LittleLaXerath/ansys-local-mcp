@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Adds the first Mechanical basic-analysis acceptance: coordinate-system and
+  named-selection load equivalence through Workbench, sequential 4-core static
+  solves, native DPF nodal-vector readback and an independent beam reference.
+- Adds run-scoped coordinate receipts with original export hashes, material XML,
+  geometry integrity, frozen scripts and confirmed shutdown. Existing 17 tools,
+  10 workflow steps and 6 schema resources are unchanged; other P4 cases remain pending.
+- Shares bounded acceptance-client and SI material parsing helpers without new
+  runtime dependencies. Ordinary tests never start Ansys products.
 - Fixes Windows CI evidence-path comparison for 8.3 TEMP aliases without
   weakening path validation or skipping tests.
 - Adds product-scoped Fluent/CFX workflow receipts, independent revalidation of

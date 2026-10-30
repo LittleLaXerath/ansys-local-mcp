@@ -163,6 +163,11 @@ Actions：`get_template`、`create_system`、`get_system`、`get_component`、`g
 
 示例包括 [SpaceClaim 几何工作流](examples/workbench_recipe.example.json)、[SpaceClaim 直接通道](examples/spaceclaim_direct.example.json)和 [CFX 已有工程设置](examples/cfx_workbench.example.json)。SpaceClaim 脚本创建矩形流体体积、命名入口/出口/壁面、校验体积并导出原生文件、STEP 和测量结果。CFX 示例修改已有域的湍流设置并返回 `PhysicsStatus`，不负责生成网格或求解。运行前提和验证范围见[示例说明](examples/README.md)。
 
+## Mechanical 基础验收
+
+Mechanical 基础分析进度见[验收包](docs/mechanical-basics.md)：坐标系与命名选择已通过
+真实 Workbench/DPF 等价性验收，并可查询回执；其余八项基础分析仍待实施。
+
 ## PyFluent
 
 Fluent/CFX 数值记录可通过带哈希的回执登记，再用
