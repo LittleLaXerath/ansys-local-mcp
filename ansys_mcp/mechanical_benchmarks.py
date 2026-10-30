@@ -312,14 +312,24 @@ def validate_basic_receipt(
     def source(role):
         path = require_allowed_file(parameters["sources"][role], base=base)
         if path not in set(resolved.values()):
-            raise ValueError("Coordinate source must be hash-bound: " + role)
+            raise ValueError("Basic-analysis source must be hash-bound: " + role)
         return path
 
     def read(role):
         return json.loads(source(role).read_text(encoding="utf-8"))
 
     transient = receipt.validator == "transient_sdof"
-    if transient:
+    harmonic = receipt.validator == "harmonic_sdof"
+    if harmonic:
+        from .transient_benchmark import transient_material
+        from .harmonic_benchmark import harmonic_curve, validate_harmonic
+
+        properties = transient_material(source("material"), parameters["material_name"])
+        checked = validate_harmonic(
+            report, {**parameters, **properties}, harmonic_curve(source("harmonic_field"), report)
+        )
+        names = ("harmonic",)
+    elif transient:
         from .transient_benchmark import (
             transient_material,
             transient_curve,

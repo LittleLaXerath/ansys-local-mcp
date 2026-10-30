@@ -2,9 +2,16 @@
 
 ## Unreleased
 
+- Adds a Workbench-first Full harmonic benchmark with a native PointMass,
+  explicit mass-proportional damping and independent complex frequency-response
+  checks. Both complex parts, all native frequency sets and final Mechanical
+  amplitude are verified; six P4 basic cases remain pending.
+- Preserves and validates Mechanical real/imaginary frequency-record mapping
+  instead of treating both records as separate DPF frequency-set IDs.
+
 - Adds a Workbench-first transient structural benchmark with project-local
   Engineering Data, a native tip PointMass, all-time DPF readback and an
-  independent undamped SDOF step-response reference. Seven P4 cases remain pending.
+  independent undamped SDOF step-response reference.
 - Selects Mechanical basic cases through the existing acceptance runner's case
   registry and shares receipt integrity checks; no new MCP tools or dependencies.
 - Canonicalizes surrounding XML-unit whitespace while keeping physical SI-unit

@@ -20,6 +20,10 @@ use fresh generated projects; measured support is listed in
 通过现有 Engineering Data 操作创建工程内材料。带参数脚本由 `--case transient_sdof`
 验收入口生成；完整时间历程导出和数值比较不以该单步模板执行成功代替。
 
+[谐响应模板](mechanical_harmonic.workflow.example.json) 复用同一通道和工程内材料。
+`--case harmonic_sdof` 生成参数化脚本，并按原生频率集合导出实部/虚部，独立比较频响幅值和相位；
+Mechanical 实虚记录与 DPF 频率编号的映射会显式核对。
+
 [Fluent 持久会话示例](fluent_persistent.workflow.example.json) 演示创建、跨 step 复用和显式关闭；
 真实执行会启动 Fluent，检查格式时请使用 `validation_mode="schema"`。
 

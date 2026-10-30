@@ -30,6 +30,7 @@ from ansys_mcp.transient_benchmark import (
     transient_curve,
     find_transient_material,
 )
+from ansys_mcp.harmonic_benchmark import harmonic_curve, validate_harmonic
 from tools._mcp_acceptance import mcp_client, tool_value
 from tools.run_product_acceptance import _wrapper
 
@@ -47,11 +48,32 @@ CASE_SPECS = {
         "template": "Transient Structural (ANSYS)",
         "project": "transient.wbpj",
         "results": ("transient",),
+        "axis": "times_s",
+        "curve_reader": transient_curve,
+        "validator": validate_transient,
         "parameters": {
             "mass_kg": 1000.0,
             "force_n": 100.0,
             "dt_s": 0.00005,
             "end_time_s": 0.04,
+            "material_name": "MCP SDOF Linear",
+        },
+    },
+    "harmonic_sdof": {
+        "script": "mechanical_harmonic_acceptance.py",
+        "template": "Harmonic Response (ANSYS)",
+        "project": "harmonic.wbpj",
+        "results": ("harmonic",),
+        "axis": "frequencies_hz",
+        "curve_reader": harmonic_curve,
+        "validator": validate_harmonic,
+        "parameters": {
+            "mass_kg": 1000.0,
+            "force_n": 100.0,
+            "mass_damping_s_inv": 44.721359549995796,
+            "frequency_min_hz": 20.0,
+            "frequency_max_hz": 120.0,
+            "frequency_intervals": 100,
             "material_name": "MCP SDOF Linear",
         },
     },
@@ -136,6 +158,7 @@ async def execute(
     case: str = "coordinate_equivalence",
 ):
     specification = CASE_SPECS[case]
+    axis = specification.get("axis")
     started = time.monotonic()
     deadline = started + 1800
     installation = workflow_scope("mechanical", discover_installation().version_tag)
@@ -180,7 +203,7 @@ async def execute(
                 "op": "project_save",
                 "path": str(directory / "preflight.wbpj"),
             },
-            *(material_operations(parameters) if case == "transient_sdof" else []),
+            *(material_operations(parameters) if "material_name" in parameters else []),
             {"id": "benchmark", "op": "script", "script_path": str(script)},
         ],
     }
@@ -283,16 +306,15 @@ async def execute(
                                     "time_scoping": list(
                                         range(
                                             1,
-                                            len(report["cases"]["transient"]["times_s"])
-                                            + 1,
+                                            len(report["cases"][name][axis]) + 1,
                                         )
                                     )
-                                    if case == "transient_sdof"
+                                    if axis
                                     else 1,
                                     "requested_location": "Nodal",
                                     **(
                                         {"mesh_scoping": report["tip_node_ids"]}
-                                        if case == "transient_sdof"
+                                        if axis
                                         else {}
                                     ),
                                 },
@@ -309,7 +331,7 @@ async def execute(
             await run("02-fields", steps)
             properties, material_file = (
                 find_transient_material(directory, parameters["material_name"])
-                if case == "transient_sdof"
+                if "material_name" in parameters
                 else find_structural_steel(directory)
             )
             _write_json(directory / "material-properties.json", properties)
@@ -323,12 +345,14 @@ async def execute(
             }
             _write_json(directory / "validation-parameters.json", parameters)
             validation = (
-                validate_transient(
+                specification["validator"](
                     report,
                     parameters,
-                    transient_curve(directory / "transient.csv", report),
+                    specification["curve_reader"](
+                        directory / (specification["results"][0] + ".csv"), report
+                    ),
                 )
-                if case == "transient_sdof"
+                if axis
                 else validate_coordinates(
                     report,
                     parameters,

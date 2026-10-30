@@ -7,6 +7,18 @@ are retained only in the local ignored run directory.
 
 ## Baseline
 
+P4 harmonic case (2026-10-30): a new Workbench Full harmonic project with native
+PointMass and explicit mass-proportional damping passed 100-frequency complex
+displacement checks. Maximum complex error 0.0262003%, amplitude error 0.0150184%
+and phase error 0.0149926 degrees; source hashes, project save and confirmed
+shutdown passed. The first DPF frequency-mapping failure remains retained.
+This is not mode-superposition or arbitrary vibration validation. See
+[the harmonic pack](mechanical-basics.md#harmonic-response-benchmark).
+
+Latest non-product regression: 358 tests, 356 passed, two explicit opt-in skips,
+zero failures/errors in the supported Windows worker environment. Ordinary
+medium-token WMI limitations still apply; CI never starts a product.
+
 P4 transient case (2026-10-30): a new Workbench Transient Structural project,
 project-local zero-Poisson material and native tip PointMass were solved with
 4 SMP cores. DPF read all 800 result sets; the independent undamped SDOF reference
@@ -19,7 +31,7 @@ P4 first case (2026-10-30): a new Workbench coordinate/named-selection benchmark
 passed two 4-core static solves and native DPF comparison of 6,696 nodal vectors.
 Vector equivalence error/peak was 7.36148e-12; analytical beam-tip error 0.309014%.
 Source geometry hashes matched and product shutdown was confirmed. A run-scoped
-receipt is queryable. This does not complete the other eight P4 analyses.
+receipt is queryable. This first-case result alone does not complete P4.
 See [basic acceptance](mechanical-basics.md).
 
 CFD evidence follow-up (2026-10-29): the retained Fluent channel and CFX short
@@ -128,7 +140,7 @@ members and the current installation/backend, not every entry with the same tag.
 | Engineering Data/materials | 404 | Structured create/modify/export/import, assignment and saved-property checks |
 | Geometry | 1,197 | Generated CAD import and geometric scoping |
 | Selection | 2,808 | Named selections and typed geometry selections |
-| Coordinate systems | 1,580 | Catalogued; dedicated workflow not verified |
+| Coordinate systems | 1,580 | Rotated-load/named-selection static equivalence benchmark |
 | Mesh | 4,626 | Quadratic swept solid meshes |
 | Connections | 7,399 | Frictional contact and remote displacement |
 | Loads/constraints | 9,783 | Force, temperature and tabular pressure in measured cases |
@@ -136,9 +148,9 @@ members and the current installation/backend, not every entry with the same tag.
 | Results | 36,566 | Nodal fields, reaction/flux/contact results, CSV and native PNG/GIF exports |
 | Parameters | 2,347 | Input/output creation, readback and two retained design-point updates |
 | Static structural | 2 | Cantilever and contact compression |
-| Transient structural | 1 | Catalogued; dedicated solve not verified |
+| Transient structural | 1 | Undamped mass-dominated axial step-response benchmark |
 | Modal | 88 | First cantilever frequency |
-| Harmonic | 104 | Catalogued; dedicated solve not verified |
+| Harmonic | 104 | Full-method mass-damped axial complex-response benchmark |
 | Response spectrum | 2 | Catalogued; dedicated solve not verified |
 | Random vibration | 1 | Catalogued; dedicated solve not verified |
 | Buckling | 2 | Catalogued; dedicated solve not verified |

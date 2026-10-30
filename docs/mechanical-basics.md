@@ -10,7 +10,7 @@ It does **not** claim coverage of every Mechanical analysis or extension.
 | --- | --- |
 | Coordinate systems and named selections | Passed on the documented v261 benchmark |
 | Transient structural | Passed for the documented undamped mass-dominated axial benchmark |
-| Harmonic response | Pending |
+| Harmonic response | Passed for the documented Full-method, mass-damped axial benchmark |
 | Response spectrum | Pending |
 | Random vibration | Pending |
 | Eigenvalue buckling | Pending |
@@ -127,7 +127,58 @@ query_capabilities(product="mechanical", version="261", kind="workflow", compone
 
 This does not validate damping, nonlinear contact, arbitrary load histories,
 initial-velocity workflows, mesh/time-step independence or every transient
-element type. The other seven planned basic analysis cases remain pending.
+element type. Other analysis categories need their own acceptance.
+
+## Harmonic Response Benchmark
+
+```powershell
+python -m tools.run_mechanical_basics --case harmonic_sdof --execute --geometry-path path/to/benchmark-beam.step --output path/to/new-harmonic-run --register-evidence
+```
+
+This case reuses the project-local zero-Poisson material and 1,000 kg native
+tip PointMass. It selects Mechanical's Full harmonic method, 4 SMP cores and
+100 linear solution intervals between 20 and 120 Hz. A real 100 N axial force
+has zero phase. Mass-proportional damping alpha=44.72135955 per second gives
+an SDOF reference damping ratio of 0.05; stiffness-proportional and constant
+damping are zero. Parameters, face scoping, mass, damping, solver settings and
+saved material data are read back, rather than inferred from script success.
+
+The independent reference is the complex displacement
+`U(w)=F/(k-m*w*w+i*alpha*m*w)`, with `k=E*A/L`. No stiffness, mass or damping
+is fitted to solver output. This is a mass-dominated FE approximation, not a
+claim that the complete solid model has one degree of freedom.
+
+Mechanical's native reader can list the real and imaginary records at the
+same frequency separately. The report preserves that raw axis and checks its
+mapping to DPF's frequency-set IDs. DPF exports both complex parts and all tip
+nodes; labels, not field order, join the data. Missing parts/nodes, duplicate
+rows, wrong units or mismatched frequencies fail. See the official
+[complex-result example](https://post.docs.pyansys.com/version/stable/examples/00-Different-analysis-types/04-harmonic-complex-results.html)
+and [harmonic methods](https://ansyshelp.ansys.com/public/Views/Secured/corp/v261/en/wb_sim/ds_harmonic_analysis_type.html).
+
+Every frequency must meet <=5% complex and amplitude relative error and
+<=3 degrees phase error. Fixed checks also require a resolved resonance,
+the expected sign/phase change across it, axial uniformity and agreement with
+Mechanical's independently evaluated final-frequency amplitude. The validator
+does not accept amplitude-only or static data as a harmonic solution.
+
+This case does not validate mode superposition, arbitrary damping models,
+nonlinear vibration, base excitation or mesh/frequency independence.
+
+Measured 2026-10-30 on v261: 100 frequencies (21 through 120 Hz), 80 elements,
+621 nodes and 21 tip nodes. Maximum complex relative error was **0.0262003%**,
+maximum amplitude error **0.0150184%**, maximum phase error **0.0149926 degrees**.
+The peak was at 71 Hz; independent undamped natural frequency was 71.1762543 Hz.
+Geometry hashes, native result readback, project save, independent receipt
+revalidation and shutdown passed. The first attempt solved successfully but
+failed DPF scoping because it counted both native complex records as frequency
+sets. That failed run remains unchanged; a fresh corrected run passed.
+
+```text
+query_capabilities(product="mechanical", version="261", kind="workflow", component="harmonic_sdof")
+```
+
+Six other planned basic analysis cases remain pending.
 
 ## Receipt Integrity
 
@@ -147,7 +198,7 @@ evidence; no other analysis API is inferred from these benchmarks.
 
 ## 中文说明
 
-目前通过“坐标系与命名选择”和“集中质量主导的轴向瞬态响应”两项，均有新工程、
-原生结果比较、单位/几何/材料读回、关闭确认与回执。不是 P4 全部完成。其余七项仍待真实
-验收，不能以已有 API 目录或这两项通过替代。工程、原生结果、失败记录和完整报告仅保留
+目前通过“坐标系与命名选择”“集中质量主导的轴向瞬态响应”和“全法质量比例阻尼轴向谐响应”
+三项，均有新工程、原生结果比较、单位/几何/材料读回、关闭确认与回执。不是 P4 全部完成。
+其余六项仍待真实验收，不能以已有 API 目录或这三项通过替代。工程、原生结果、失败记录和完整报告仅保留
 在忽略的私有目录，不进入 GitHub 仓库。
