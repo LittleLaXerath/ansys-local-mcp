@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Adds a first-run setup command that creates a separate environment, prints
+  the dependency installation command and writes local MCP configuration without starting
+  a product or overwriting an existing installation.
+- Supports `python -m ansys_mcp` and rewrites the bilingual getting-started pages
+  around the actual setup and workflow rather than internal implementation notes.
+
 - Completes the six remaining planned basic benchmark workflows through the
   existing Workbench/Mechanical/DPF channels: response spectrum, one-sigma PSD,
   Euler buckling, transient conduction, closed-cavity acoustics and native

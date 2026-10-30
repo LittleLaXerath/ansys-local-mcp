@@ -1,4 +1,5 @@
-.venv/
+.venv*/
+workspace/
 __pycache__/
 *.pyc
 .ansys_mcp/

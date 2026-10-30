@@ -1,8 +1,16 @@
 # Ansys Local MCP / Ansys 本地 MCP
 
-Experimental local MCP adapter for reliable, data-driven Ansys automation.
+让支持 MCP 的 AI 客户端调用你电脑上的 Ansys。可以通过 Workbench 管理工程，也可以直接运行 Fluent、CFX、Mechanical 和 SpaceClaim 的脚本。
 
-用于可靠、数据驱动 Ansys 自动化的实验性本地 MCP 适配器。
+Connect an MCP-compatible AI client to Ansys on your own computer. Use Workbench
+to manage projects, or run Fluent, CFX, Mechanical and SpaceClaim scripts directly.
+
+这个项目解决的是本地调用、工作流编排和结果读回，不是把所有工程判断交给 AI。
+计算前需要明确模型、单位、边界条件和验收标准；计算后仍要检查结果。
+
+The server handles local execution, workflow steps and result readback. It does
+not replace engineering judgment: define the model and acceptance criteria first,
+then check what the solver actually produced.
 
 This project is not affiliated with, endorsed by, or sponsored by Ansys.
 
@@ -64,13 +72,30 @@ or numerically validated. See the validation report for measured support.
 
 ## Install / 安装
 
+需要 Windows、Python 3.11 或更新版本，以及可工作的本机 Ansys 安装。首次使用可在仓库目录运行：
+
+You need Windows, Python 3.11 or newer, and a working local Ansys installation.
+For a first-time setup, run:
+
 ```powershell
 git clone https://github.com/LittleLaXerath/ansys-local-mcp.git
 cd ansys-local-mcp
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\ansys-local-mcp.exe
+python tools/setup_local.py
+.\.venv\Scripts\python.exe -m pip install -e ".[fluent]"
 ```
+
+第一步创建独立环境和 `workspace` 目录，并生成
+`mcp_client_config.json`。把其中的服务器条目加入自己的 MCP 客户端即可；配置使用你本机的完整路径，
+不需要照抄维护者的环境。先完成第二步依赖安装（含 PyFluent），再连接客户端。
+已有环境或配置不会被覆盖，也不会自动启动 Ansys。
+
+Setup creates a virtual environment and workspace, and writes `mcp_client_config.json`.
+The second command installs dependencies including PyFluent. After it succeeds, add the server
+entry to your MCP client. The generated paths belong to your machine; existing
+environments/configurations are not overwritten, and no solver is started.
+
+已有安装、需要自选目录或遇到权限问题时，见[中文说明](README.zh-CN.md) / [English README](README.en.md)。
+首次连接先调用 `inspect_runtime` 检查环境；生成配置不等于产品求解已通过验收。
 
 ## Safety / 安全
 

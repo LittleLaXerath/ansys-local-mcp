@@ -1,15 +1,21 @@
 # Ansys Local MCP Server
 
-Worker permission diagnostics, dry-run log retention and hash-checked workflow
-receipt imports are described in [Operations](docs/operations.md).
-`query_capabilities(kind="workflow")` queries verified receipts; its default
-`kind="api"` remains the public API catalog. There are still 17 tools.
-
 [Main page](README.md) | [中文说明](README.zh-CN.md)
 
-An experimental Windows-local MCP server for orchestrating Ansys through strict
-JSON workflows, structured Workbench recipes, direct product commands, and
-generic PyFluent operations.
+This server lets an MCP-compatible AI client work with Ansys installed on your
+computer. It can manage projects through Workbench, run trusted scripts, follow
+long-running jobs and read results back. Direct routes to Fluent, CFX,
+Mechanical and SpaceClaim are available too.
+
+Workflows are JSON files, so a new task usually needs a new recipe rather than
+another MCP tool. Runs keep their logs, and unknown outcomes are not silently
+retried. The project is experimental: it does not decide whether a model is
+appropriate, and a successful process exit is not proof of a valid solution.
+
+See [validation](docs/validation.md) for the workflows and numerical checks
+actually tested. The API catalog helps discover interfaces; it is not a claim
+that every listed function works. [Operations](docs/operations.md) covers worker
+permissions, logs and troubleshooting.
 
 This project is not affiliated with, endorsed by, or sponsored by Ansys. It
 does not ship Ansys software, licenses, solvers, or proprietary project data.
@@ -19,20 +25,41 @@ The MCP does not inspect, bypass, modify, or manage licensing.
 
 ## Install
 
+Start with Windows, Python 3.11 or newer, and a working local Ansys installation.
+For a fresh checkout:
+
 ```powershell
 git clone https://github.com/LittleLaXerath/ansys-local-mcp.git
 cd ansys-local-mcp
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
+python tools/setup_local.py
+.\.venv\Scripts\python.exe -m pip install -e ".[fluent]"
 ```
 
-Run the console entry point:
+The first command creates `.venv`, a `workspace` folder and `mcp_client_config.json`.
+The second installs dependencies including PyFluent. After installation succeeds, add that server entry to
+your MCP client, then call `inspect_runtime`. No Ansys product or solver is
+started. The generated configuration uses an absolute Python path, so the
+client does not need an activated virtual environment.
+
+Existing environments and configurations are never overwritten. To choose
+different locations for a new installation:
 
 ```powershell
-.\.venv\Scripts\ansys-local-mcp.exe
+python tools/setup_local.py --venv-path .venv-new --workspace C:\AnsysWork --config-path .ansys_mcp/client-new.json
 ```
 
-The legacy `.\.venv\Scripts\python.exe .\ansys_mcp_server.py` entry point remains available.
+Then run the installation command printed by setup. Add `--use-existing-env` to
+generate configuration for an existing environment without changing its packages.
+
+Local configuration and the default workspace are ignored by Git. Workflow
+inputs, scripts and outputs must be inside your allowed roots. Copy the
+examples you intend to use into your workspace, review their paths and scripts,
+and validate before running them.
+
+Manual installation is still supported: `python -m venv .venv`, followed by
+`.\.venv\Scripts\python.exe -m pip install -e ".[fluent]"`.
+The legacy `.\.venv\Scripts\python.exe .\ansys_mcp_server.py` and console entry
+point remain available.
 For an MCP client launched outside the activated environment, set its `command`
 to the full path of that environment's `ansys-local-mcp.exe`. The short command
 in the example assumes the executable is already on the client's PATH.

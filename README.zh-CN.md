@@ -1,31 +1,43 @@
 # Ansys 本地 MCP 服务器
 
-后台权限诊断、默认 dry-run 的日志维护和可核查验收回执见[运行维护说明](docs/operations.md)。
-`query_capabilities(kind="workflow")` 查询工作流证据，默认 `kind="api"` 仍查询公开 API 目录。
-工具数量保持 17 个。
-
 [主页面](README.md) | [English README](README.en.md)
 
-这是一个实验性的 Windows 本地 MCP 服务器，通过严格 JSON 工作流、结构化 Workbench recipe、直接产品命令和通用 PyFluent 操作编排 Ansys。
+这个项目把你电脑上的 Ansys 接到支持 MCP 的 AI 客户端上。日常可以让客户端创建或修改工程、运行受信任的脚本、查看求解状态，再把结果文件和数值读回来，不必每做一种操作就增加一个专用工具。
+
+主要入口是 Workbench，同时保留 Fluent、CFX、Mechanical 和 SpaceClaim 的直接通道。工作流使用 JSON 描述，运行过程有日志；长任务可以查询或取消。它仍是实验性工具，不能替代建模判断，也不能把“程序退出正常”当作结果正确。
+
+已经实际测过哪些流程、比较了哪些数值，见[验收记录](docs/validation.md)。公开 API 目录只用于发现接口，不表示目录里的所有功能都已验证。后台权限与故障排查见[运行维护说明](docs/operations.md)。
 
 本项目不是 Ansys 官方项目，也未获得 Ansys 背书、赞助或认可。仓库不包含 Ansys 软件、许可证、求解器或专有工程数据。使用时需要本机存在可工作的 Ansys 安装；产品授权和合规由用户与 Ansys 产品自身负责。本 MCP 不检查、绕过、修改或管理授权。
 
 ## 安装
 
+准备 Windows、Python 3.11 或更新版本，以及可工作的本机 Ansys。克隆仓库后，首次设置只需：
+
 ```powershell
 git clone https://github.com/LittleLaXerath/ansys-local-mcp.git
 cd ansys-local-mcp
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
+python tools/setup_local.py
+.\.venv\Scripts\python.exe -m pip install -e ".[fluent]"
 ```
 
-运行控制台入口：
+第一步创建 `.venv` 和 `workspace`，并生成本机专用的
+`mcp_client_config.json`。第二步安装包含 PyFluent 的依赖；成功后把配置中的服务器条目添加到 MCP 客户端，然后调用 `inspect_runtime`。
+该步骤不启动产品或求解。生成的配置使用完整解释器路径，不依赖客户端是否激活了虚拟环境。
+
+如果已有 `.venv` 或同名配置，设置程序会停止，不覆盖在线环境。可为新安装指定其他路径：
 
 ```powershell
-.\.venv\Scripts\ansys-local-mcp.exe
+python tools/setup_local.py --venv-path .venv-new --workspace C:\AnsysWork --config-path .ansys_mcp/client-new.json
 ```
 
-旧入口 `.\.venv\Scripts\python.exe .\ansys_mcp_server.py` 继续保留。
+接着执行设置程序打印的安装命令。只给已有环境生成配置时，另加 `--use-existing-env`；它不会修改该环境的包。
+
+生成的本机配置和工作目录默认不提交到 Git。工作流里的输入、脚本和输出都必须位于配置的 allowed roots 内；
+使用仓库示例时，先把需要的示例复制到自己的工作目录，检查脚本和路径，再验证运行。
+
+也可以手动安装：`python -m venv .venv`，再执行 `.\.venv\Scripts\python.exe -m pip install -e ".[fluent]"`。
+旧入口 `.\.venv\Scripts\python.exe .\ansys_mcp_server.py` 和 `ansys-local-mcp` 控制台入口继续保留。
 从未激活虚拟环境的 MCP 客户端启动时，将 `command` 设为该环境中
 `ansys-local-mcp.exe` 的完整路径。示例短命令假定客户端 PATH 已包含此入口。
 
